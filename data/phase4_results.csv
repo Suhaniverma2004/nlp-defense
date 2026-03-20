@@ -1,0 +1,5 @@
+attack,baseline,sanitized,final
+emoji_insertion,0.642815171,0.8373,1.0
+emoji_replacement,0.688920486,0.7192,0.7207937061786651
+unicode,0.587596048,1.0,1.0
+whitespace,0.419832637,0.4198,0.7532072424888611
