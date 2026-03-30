@@ -9,7 +9,7 @@ hidden size.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from char_vocab import build_char_vocab
+from src.char_vocab import build_char_vocab
 
 
 class CharEncoder(nn.Module):
