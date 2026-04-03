@@ -1,9 +1,9 @@
 """
 Character Vocabulary Module
 
-Build a character vocabulary for creating character-level embeddings.
-Includes support for lowercase letters, uppercase letters, digits,
-punctuation, and whitespace characters.
+Build a character vocabulary for character-level embeddings.
+Supports lowercase, uppercase, digits, punctuation, and whitespace.
+Includes special tokens for padding and unknown characters.
 """
 
 import string
@@ -11,75 +11,85 @@ import string
 
 def build_char_vocab():
     """
-    Build a character vocabulary dictionary.
-    
+    Build character vocabulary.
+
     Returns:
-        dict: char2idx mapping with special tokens
-            - PAD token at index 0
-            - Followed by all supported characters
+        dict: char → index mapping
+            <PAD> = 0
+            <UNK> = 1
     """
+
     # Special tokens
-    vocab = {'<PAD>': 0}
-    
+    vocab = {
+        '<PAD>': 0,
+        '<UNK>': 1
+    }
+
     # Lowercase letters
     for char in string.ascii_lowercase:
         vocab[char] = len(vocab)
-    
+
     # Uppercase letters
     for char in string.ascii_uppercase:
         vocab[char] = len(vocab)
-    
+
     # Digits
     for char in string.digits:
         vocab[char] = len(vocab)
-    
+
     # Punctuation
     for char in string.punctuation:
         vocab[char] = len(vocab)
-    
-    # Whitespace (space, tab, newline, etc.)
+
+    # Whitespace characters
     whitespace_chars = [' ', '\t', '\n', '\r']
     for char in whitespace_chars:
         vocab[char] = len(vocab)
-    
+
     return vocab
 
 
 def get_char_idx(char, char_vocab):
     """
-    Get the index of a character from vocabulary.
-    
+    Get index of a character.
+
     Args:
-        char (str): Single character
-        char_vocab (dict): Character to index mapping
-    
+        char (str): single character
+        char_vocab (dict): vocabulary
+
     Returns:
-        int: Index of character, or 0 (PAD) if not in vocabulary
+        int: index of character
     """
-    return char_vocab.get(char, 0)
+
+    # Normalize to lowercase to reduce sparsity
+    char = char.lower()
+
+    # Return UNK if character not found
+    return char_vocab.get(char, char_vocab['<UNK>'])
 
 
 def encode_text_to_char_ids(text, char_vocab):
     """
-    Encode text to character IDs using the vocabulary.
-    
+    Encode text into character IDs.
+
     Args:
-        text (str): Input text to encode
-        char_vocab (dict): Character to index mapping
-    
+        text (str): input text
+        char_vocab (dict): vocabulary
+
     Returns:
-        list: List of character indices
+        list[int]: list of character indices
     """
-    return [get_char_idx(char, char_vocab) for char in text]
+    return [get_char_idx(c, char_vocab) for c in text]
 
 
 if __name__ == "__main__":
-    # Example usage
     vocab = build_char_vocab()
-    print(f"Character vocabulary size: {len(vocab)}")
-    print(f"First 10 entries: {dict(list(vocab.items())[:10])}")
-    
-    # Test encoding
-    test_text = "hello"
+
+    print(f"Vocabulary size: {len(vocab)}")
+    print(f"Sample entries: {list(vocab.items())[:10]}")
+
+    test_text = "Hello@123"
     char_ids = encode_text_to_char_ids(test_text, vocab)
-    print(f"\nEncoding '{test_text}': {char_ids}")
+
+    print(f"\nText: {test_text}")
+    print(f"Encoded: {char_ids}")
