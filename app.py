@@ -11,6 +11,8 @@ from src.phase5_model import (
 
 from src.attack_engine import ATTACKS
 from src.composite_defense import is_composite
+from src.domain_classifier import detect_domain
+from src.domain_rules import apply_domain_rules
 
 # ---------------- CONFIG ----------------
 st.set_page_config(
