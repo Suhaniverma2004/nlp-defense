@@ -41,18 +41,17 @@ def compute_similarity(text1, text2):
 
 
 def get_attack_category(name):
+
+    name = name.lower()
+
     if "prompt" in name:
         return "Prompt Injection"
-    elif "obfuscation" in name:
-        return "Obfuscation"
-    elif "token" in name or "whitespace" in name:
-        return "Tokenization"
+    elif "obfuscation" in name or "unicode" in name:
+        return "Obfuscation Attack"
+    elif "whitespace" in name or "token" in name or "emoji" in name:
+        return "Tokenization Attack"
     elif "mixed" in name:
-        return "Mixed"
-    elif "emoji" in name:
-        return "Tokenization"
-    elif "unicode" in name:
-        return "Obfuscation"
+        return "Mixed Attack"
     else:
         return "Other"
 
