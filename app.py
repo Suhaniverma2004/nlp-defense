@@ -26,6 +26,7 @@ BASE_THRESHOLD = 0.85
 
 
 # ---------------- UTILS ----------------
+
 def compute_similarity(text1, text2):
     input_ids1, char_ids1, mask1 = prepare_inputs(text1)
     input_ids2, char_ids2, mask2 = prepare_inputs(text2)
@@ -38,6 +39,15 @@ def compute_similarity(text1, text2):
     emb2 = get_sentence_embedding(out2, mask2)
 
     return F.cosine_similarity(emb1, emb2).item()
+
+def get_risk_level(score):
+
+    if score >= 0.90:
+        return "🟢 LOW"
+    elif score >= 0.75:
+        return "🟡 MEDIUM"
+    else:
+        return "🔴 HIGH"
 
 
 def get_attack_category(name):
@@ -174,11 +184,3 @@ if run:
             st.markdown(f"**{row['Attack']} ({row['Category']})**")
             st.code(row["Attacked Text"])
             st.markdown("---")
-def get_risk_level(score):
-
-    if score >= 0.90:
-        return "🟢 LOW"
-    elif score >= 0.75:
-        return "🟡 MEDIUM"
-    else:
-        return "🔴 HIGH"
