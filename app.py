@@ -98,13 +98,14 @@ if run:
         attacked = attack_fn(text)
         score = compute_similarity(text, attacked)
 
-        threshold = 0.75 if is_composite(attacked) else BASE_THRESHOLD
+        threshold = 0.70 if is_composite(attacked) else BASE_THRESHOLD
         status = "PASS" if score >= threshold else "FAIL"
 
         results.append({
             "Attack": name,
             "Category": get_attack_category(name),
             "Similarity": round(score, 3),
+            "Risk": get_risk_level(score),
             "Threshold": threshold,
             "Status": status,
             "Attacked Text": attacked
@@ -173,3 +174,11 @@ if run:
             st.markdown(f"**{row['Attack']} ({row['Category']})**")
             st.code(row["Attacked Text"])
             st.markdown("---")
+def get_risk_level(score):
+
+    if score >= 0.90:
+        return "🟢 LOW"
+    elif score >= 0.75:
+        return "🟡 MEDIUM"
+    else:
+        return "🔴 HIGH"
