@@ -27,8 +27,17 @@ def composite_clean(text):
 def is_composite(text):
     score = 0
 
-    if any(c in text for c in "@03"): score += 1
-    if any(e in text for e in ["🔥","💀","💣","⚠️","🎯","😊"]): score += 1
-    if " " in text and len(text.split()) > len("".join(text.split())): score += 1
+    # Obfuscation
+    if any(c in text for c in "@03"):
+        score += 1
+
+    # Emoji
+    if any(e in text for e in ["🔥","💀","💣","⚠️","🎯","😊"]):
+        score += 1
+
+    # Broken spacing (VERY IMPORTANT FIX)
+    tokens = text.split()
+    if len(tokens) > 5 and any(len(t) == 1 for t in tokens):
+        score += 1
 
     return score >= 2
