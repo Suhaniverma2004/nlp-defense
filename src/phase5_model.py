@@ -4,7 +4,7 @@ from transformers import DistilBertModel, DistilBertTokenizer
 from src.char_vocab import build_char_vocab
 
 # 🔥 NEW IMPORTS
-from src.sanitization import sanitize_text
+from src.sanitization import sanitize as sanitize_text
 from src.composite_defense import composite_clean, is_composite
 
 tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
