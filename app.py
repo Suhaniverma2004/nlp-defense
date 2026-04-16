@@ -112,14 +112,18 @@ if run:
 
         threshold = 0.70 if is_composite(attacked) else BASE_THRESHOLD
         status = "PASS" if score >= threshold else "FAIL"
+        domain = detect_domain(attacked)
+        decision = apply_domain_rules(domain, attacked, status)
 
         results.append({
             "Attack": name,
+            "Domain": domain, 
             "Category": get_attack_category(name),
             "Similarity": round(score, 3),
             "Risk": get_risk_level(score),
             "Threshold": threshold,
             "Status": status,
+            "Decision": decision,  
             "Attacked Text": attacked
         })
 
