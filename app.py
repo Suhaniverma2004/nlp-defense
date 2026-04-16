@@ -121,6 +121,17 @@ if run:
             "Attacked Text": attacked
         })
 
+        results.insert(0, {
+         "Attack": "clean",
+         "Category": "None",
+        "Similarity": 1.0,
+        "Threshold": BASE_THRESHOLD,
+        "Risk": "🟢 LOW",
+        "Status": "PASS",
+        "Attacked Text": text
+        })
+
+
     df = pd.DataFrame(results)
 
     # ---------------- METRICS CARDS ----------------
