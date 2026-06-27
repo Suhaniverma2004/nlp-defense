@@ -73,10 +73,13 @@ def process_text(text):
 
 
 # ---------------- INPUT PREPARATION ----------------
-def prepare_inputs(text, max_length=128, char_max_len=20):
+def prepare_inputs(text,
+    max_length=128,
+    char_max_len=20,
+    apply_defense=True):
 
-    # 🔥 APPLY DEFENSE BEFORE TOKENIZATION
-    text = process_text(text)
+    if apply_defense:
+        text = process_text(text)
 
     encoding = tokenizer(
         text,
