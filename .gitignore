@@ -137,3 +137,9 @@ outputs/
 .env.local
 models/pretrained/
 data/temp/
+
+# Trained/generated models
+models/
+
+# Generated paper PDF
+paper_revised.pdf

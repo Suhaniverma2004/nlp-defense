@@ -1,44 +1,163 @@
+import numpy as np
 import pandas as pd
 
-# Load datasets
-phase1 = pd.read_csv("data/baseline_results.csv")
-phase2 = pd.read_csv("data/comparison.csv")
-phase3 = pd.read_csv("data/phase3_summary.csv")
+# =====================================================
+# Load Detailed Results
+# =====================================================
 
-# ---------------- Phase 1 ----------------
-phase1 = phase1[["type", "similarity"]]
-phase1 = phase1.rename(columns={
-    "type": "attack",
-    "similarity": "baseline"
-})
-
-# average similarity per attack
-phase1 = phase1.groupby("attack", as_index=False).mean()
+baseline = pd.read_csv("data/baseline_results.csv")
+defense = pd.read_csv("data/defense_results.csv")
+phase3 = pd.read_csv("data/phase3_results.csv")
 
 
-# ---------------- Phase 2 ----------------
-phase2 = phase2[["type", "similarity_after"]]
-phase2 = phase2.rename(columns={
-    "type": "attack",
-    "similarity_after": "sanitized"
-})
+# =====================================================
+# Phase 1 : Baseline
+# =====================================================
+
+baseline_summary = (
+    baseline.groupby("type")["similarity"]
+    .agg(
+        mean="mean",
+        std=lambda x: np.std(x, ddof=0)
+    )
+    .reset_index()
+)
+
+baseline_summary.columns = [
+    "attack",
+    "baseline_mean",
+    "baseline_std"
+]
 
 
-# ---------------- Phase 3 ----------------
-phase3 = phase3[["type", "sim_sanitized"]]
-phase3 = phase3.rename(columns={
-    "type": "attack",
-    "sim_sanitized": "final"
-})
+# =====================================================
+# Phase 2 : Defense
+# =====================================================
+
+defense_summary = (
+    defense.groupby("type")["similarity_after"]
+    .agg(
+        mean="mean",
+        std=lambda x: np.std(x, ddof=0)
+    )
+    .reset_index()
+)
+
+defense_summary.columns = [
+    "attack",
+    "defense_mean",
+    "defense_std"
+]
 
 
-# ---------------- Merge All ----------------
-df = phase1.merge(phase2, on="attack")
-df = df.merge(phase3, on="attack")
+# =====================================================
+# Phase 3 : Final Sanitized
+# =====================================================
 
-# Save results
-df.to_csv("data/phase4_results.csv", index=False)
+phase3_summary = (
+    phase3.groupby("type")["sim_sanitized"]
+    .agg(
+        mean="mean",
+        std=lambda x: np.std(x, ddof=0)
+    )
+    .reset_index()
+)
 
-print("\nPhase 4 Results:")
-print(df)
+phase3_summary.columns = [
+    "attack",
+    "final_mean",
+    "final_std"
+]
+
+
+# =====================================================
+# Merge All Results
+# =====================================================
+
+df = baseline_summary.merge(defense_summary, on="attack")
+df = df.merge(phase3_summary, on="attack")
+
+
+# =====================================================
+# Round Numeric Values
+# =====================================================
+
+numeric_cols = [
+    "baseline_mean",
+    "baseline_std",
+    "defense_mean",
+    "defense_std",
+    "final_mean",
+    "final_std"
+]
+
+df[numeric_cols] = df[numeric_cols].round(3)
+
+
+# =====================================================
+# Create IEEE Table II Columns (mean ± std)
+# =====================================================
+
+df["Baseline"] = (
+    df["baseline_mean"].astype(str)
+    + " ± "
+    + df["baseline_std"].astype(str)
+)
+
+df["Defense"] = (
+    df["defense_mean"].astype(str)
+    + " ± "
+    + df["defense_std"].astype(str)
+)
+
+df["Final"] = (
+    df["final_mean"].astype(str)
+    + " ± "
+    + df["final_std"].astype(str)
+)
+
+
+# =====================================================
+# Reorder Columns
+# =====================================================
+
+paper_table = df[
+    [
+        "attack",
+
+        # Numeric columns (for plotting)
+        "baseline_mean",
+        "baseline_std",
+
+        "defense_mean",
+        "defense_std",
+
+        "final_mean",
+        "final_std",
+
+        # Formatted columns (for paper)
+        "Baseline",
+        "Defense",
+        "Final"
+    ]
+]
+
+
+# =====================================================
+# Save
+# =====================================================
+
+paper_table.to_csv(
+    "data/phase4_results.csv",
+    index=False
+)
+
+
+# =====================================================
+# Print
+# =====================================================
+
+print("\n================ Table II Results ================\n")
+print(paper_table.to_string(index=False))
+
 print("\nSaved -> data/phase4_results.csv")
