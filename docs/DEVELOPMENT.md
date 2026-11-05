@@ -1,5 +1,13 @@
 # Development and test environment
 
+## Supported Python version
+
+Python 3.10 or newer is required. The shared Unicode/alignment modules use
+Python 3.10 union type syntax. The repository's CI currently runs Python 3.13,
+and the documented clean development environment has been verified with
+CPython 3.14.2; those versions do not establish compatibility with versions
+older than the declared 3.10 minimum.
+
 ## Verified environment
 
 The repository was checked with 64-bit CPython 3.14.2 on Windows. A clean
