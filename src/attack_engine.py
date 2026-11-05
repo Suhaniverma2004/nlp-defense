@@ -25,6 +25,18 @@ def mixed_attack(text):
     return whitespace_attack(text)
 
 
+TRANSFORMATIONS = {
+    "Emoji Insertion": emoji_insertion,
+    "Emoji Replacement": emoji_replacement,
+    "Unicode Homoglyph Substitution": unicode_attack,
+    "Whitespace Spacing": whitespace_attack,
+    "Character Repetition": repeated_chars,
+    "Punctuation Noise": punctuation_noise,
+    "Case Change": case_flip,
+    "Mixed Transformation": mixed_attack,
+}
+
+# Historical mapping retained for callers that still use the old labels.
 ATTACKS = {
     "Emoji Insertion": emoji_insertion,
     "Emoji Replacement": emoji_replacement,
@@ -33,5 +45,5 @@ ATTACKS = {
     "Repeated Characters": repeated_chars,
     "Punctuation Noise": punctuation_noise,
     "Case Flip": case_flip,
-    "Mixed Attack (Hard)": mixed_attack
+    "Mixed Attack (Hard)": mixed_attack,
 }

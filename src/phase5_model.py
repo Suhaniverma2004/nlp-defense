@@ -135,15 +135,21 @@ def get_sentence_embedding(output, attention_mask):
 
 
 # ---------------- 🔥 ADD THIS (IMPORTANT FOR PIPELINE) ----------------
-def compute_similarity(model, text1, text2):
+def compute_similarity(model, text1, text2, apply_defense=True):
 
     model.eval()
 
     with torch.no_grad():
 
         # Process both texts
-        input_ids1, char_ids1, mask1 = prepare_inputs(text1)
-        input_ids2, char_ids2, mask2 = prepare_inputs(text2)
+        input_ids1, char_ids1, mask1 = prepare_inputs(
+            text1,
+            apply_defense=apply_defense,
+        )
+        input_ids2, char_ids2, mask2 = prepare_inputs(
+            text2,
+            apply_defense=apply_defense,
+        )
 
         out1 = model(input_ids1, char_ids1, mask1)
         out2 = model(input_ids2, char_ids2, mask2)

@@ -1,5 +1,7 @@
 # Character-Aware DistilBERT: Quick Reference
 
+> **Evaluation note:** Cosine similarity is a text-representation diagnostic, not adversarial attack detection. See [Similarity Diagnostics](docs/SIMILARITY_DIAGNOSTICS.md) for interpretation and limits.
+
 ## Installation & Setup
 
 ```python
@@ -225,15 +227,15 @@ model = create_char_aware_model(device=device)
 | GPU memory | ~330 MB | vs 270 MB baseline |
 | Inference (GPU) | 50-100ms | batch_size=4, seq_len=128 |
 | Inference (CPU) | 200-400ms | Depending on CPU |
-| Training speed | 2-3x slower | But better robustness |
+| Training speed | 2-3x slower | Compute overhead; task benefit must be measured separately |
 
 ## Next Steps
 
 1. **Prepare Data**: Convert texts to (input_ids, char_ids)
 2. **Fine-tune**: Train on task-specific dataset
-3. **Evaluate**: Test robustness on adversarial examples
+3. **Evaluate**: Measure task performance with labeled held-out data; use similarity diagnostics only for representation comparison
 4. **Deploy**: Integrate into your pipeline
-5. **Monitor**: Track accuracy and robustness metrics
+5. **Monitor**: Track task metrics and similarity diagnostics separately
 
 ---
 

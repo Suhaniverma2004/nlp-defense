@@ -2,7 +2,11 @@
 
 ## Overview
 
-Phase 5 implements the integration of character-level embeddings into DistilBERT to create a robust model against tokenization-level adversarial attacks. This phase enhances the model architecture itself rather than applying post-hoc defense mechanisms.
+Phase 5 implements the integration of character-level embeddings into DistilBERT for research on tokenization-level text transformations. This phase changes the model architecture rather than applying only post-hoc text processing.
+
+## Evaluation Scope
+
+Cosine similarity between clean and transformed text is only a representation-preservation diagnostic. Similarity preservation is not adversarial attack detection: low similarity does not prove an attack was detected, and high similarity does not prove an input is safe. Detection claims require a trained classifier, explicit ground-truth labels, and a suitable evaluation protocol. See [Similarity Diagnostics](./SIMILARITY_DIAGNOSTICS.md).
 
 ## Implementation Status: ✓ COMPLETE
 
@@ -158,43 +162,43 @@ outputs = model(
 - Forward pass (batch_size=4, seq_len=128): 50-100ms
 - vs DistilBERT alone: 20-40ms
 - **Overhead**: 2-3x slower
-- **Trade-off**: Better robustness
+- **Trade-off**: Additional compute; downstream task benefits require separate evaluation
 
 ### Training Speed
 - Slightly slower due to additional computations
 - Can be mitigated by freezing DistilBERT during fine-tuning
 - Character encoder training is fast (relatively small)
 
-## Robustness Improvements
+## Transformation Examples (Not Validated Detection Results)
 
-The character-aware model improves robustness against:
+These examples describe input variations to evaluate. They are not evidence that the model detects attacks or preserves meaning:
 
 ### 1. Unicode Attacks
 ```python
 # Clean:      "attack"
 # Adversarial: "attáck"  (á instead of a)
-# Recognition: >0.95 similarity with character encoder
+# Measure similarity on held-out data; no validated score is claimed here.
 ```
 
 ### 2. Emoji Perturbations
 ```python
 # Clean:       "good message"
 # Adversarial: "good 😊 message"
-# Recognition: Preserves meaning better than standard tokenizer
+# Compare with a suitable baseline; no detection claim follows from similarity.
 ```
 
 ### 3. Whitespace Attacks
 ```python
 # Clean:       "malicious"
 # Adversarial: "mal icious"  or "m a l i c i o u s"
-# Recognition: Character-level still captures content
+# Measure the resulting representation; do not infer input safety.
 ```
 
 ### 4. Number/Symbol Substitution
 ```python
 # Clean:       "system"
 # Adversarial: "sy5t3m"
-# Recognition: Characters preserved, semantic meaning intact
+# Use labeled task evaluation to assess classifier behavior.
 ```
 
 ## Usage Examples
@@ -239,7 +243,7 @@ for batch in train_loader:
     optimizer.step()
 ```
 
-### Adversarial Robustness Evaluation
+### Similarity-Preservation Diagnostic
 ```python
 # Compare with adversarial examples
 clean_emb = model(clean_input_ids, clean_char_ids)['last_hidden_state']
@@ -247,7 +251,8 @@ adv_emb = model(adv_input_ids, adv_char_ids)['last_hidden_state']
 
 # Compute similarity
 similarity = torch.nn.functional.cosine_similarity(clean_emb, adv_emb)
-# Higher similarity = better robustness (goal: >0.95)
+# Higher similarity means closer embeddings under this representation only.
+# It does not establish attack detection or input safety.
 ```
 
 ## Integration into Existing Pipeline
@@ -280,7 +285,7 @@ def prepare_inputs(text, tokenizer, char_vocab):
 ## Next Steps
 
 ### For Evaluation
-1. **Benchmark**: Compare robustness vs baseline DistilBERT
+1. **Benchmark**: Compare labeled task performance with baseline DistilBERT
    - Test on adversarial examples from Phase 1-2
    - Measure embedding similarity before/after attacks
    - Compare with sanitization-based defense (Phase 2)
@@ -332,7 +337,7 @@ char_ids = char_ids[:, :, :8]  # Instead of 12-15
 model.char_encoder.num_filters = 50  # Instead of 100
 ```
 
-### Poor Adversarial Robustness
+### Poor Downstream Task Performance
 ```python
 # Ensure:
 1. Character inputs are diverse (not just padding)
@@ -362,10 +367,10 @@ Phase 5 successfully implements a character-aware DistilBERT model that integrat
 - ✓ Flexible fusion mechanisms (concat/add)
 - ✓ Full compatibility with DistilBERT transformers
 - ✓ Comprehensive parameter control (freezing)
-- ✓ Improved robustness against character-level attacks
+- ✓ Character-level model paths are covered by shape and gradient tests
 - ✓ Production-ready code with full test coverage
 
-The implementation is ready for downstream evaluation and integration into the project's evaluation pipeline.
+The implementation is ready for downstream, label-based task evaluation. Similarity diagnostics alone do not validate attack detection or robustness.
 
 ---
 

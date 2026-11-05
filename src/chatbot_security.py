@@ -1,58 +1,78 @@
-"""Command-line chatbot security evaluation helpers."""
+"""Similarity-preservation diagnostics for generated text transformations.
+
+Cosine similarity is a representation diagnostic, not attack detection. Low
+similarity does not prove an attack was detected, and high similarity does
+not establish that an input is safe.
+"""
 
 import pandas as pd
 
-from src.attack_generator import generate_attacks
-from src.evaluate_defense import compute_metrics
-from src.phase5_model import CharAwareModel, compute_similarity
+from src.attack_generator import generate_transformations
+from src.evaluate_defense import summarize_similarity_preservation
+from src.phase5_model import compute_similarity
 
 
-THRESHOLD = 0.85
+def run_chatbot_security(
+    original_text,
+    model=None,
+    model_name=None,
+    similarity_fn=None,
+):
+    """Return per-transformation cosine diagnostics and changed-only summaries.
 
+    A model must be supplied explicitly and must have been loaded from a
+    documented, trained checkpoint. No model is initialized by this function.
+    Similarities compare the raw original and generated text with preprocessing
+    disabled. Identical variants receive no score and are excluded from means.
 
-def classify(similarity):
-    return "PASS" if similarity >= THRESHOLD else "FAIL"
-
-
-def run_chatbot_security(user_input, model=None, similarity_fn=None):
-    """Evaluate generated variants using the shared model and metric contracts.
-
-    ``model`` and ``similarity_fn`` can be supplied by callers and tests. The
-    pretrained model and tokenizer are loaded only when real inference runs.
-    Returns the per-attack results and ``compute_metrics`` summary.
+    Returns:
+        tuple[pandas.DataFrame, pandas.DataFrame]:
+            Per-transformation rows and changed-only summary rows.
     """
-    if similarity_fn is None:
-        similarity_fn = compute_similarity
-        if model is None:
-            model = CharAwareModel()
+    if model is None:
+        raise ValueError(
+            "Supply an explicitly loaded, trained model and its checkpoint; "
+            "this diagnostic does not create or validate model weights."
+        )
+    if not model_name or not model_name.strip():
+        raise ValueError("Provide a model_name or checkpoint identifier for provenance.")
 
-    attacks = generate_attacks([user_input])
+    if similarity_fn is None:
+        similarity_fn = lambda supplied_model, original, transformed: compute_similarity(
+            supplied_model,
+            original,
+            transformed,
+            apply_defense=False,
+        )
+
+    generated = generate_transformations([original_text])
     rows = []
 
-    print("\nCHATBOT SECURITY SYSTEM\n")
-
-    for attack in attacks.itertuples(index=False):
-        similarity = similarity_fn(model, user_input, attack.adversarial)
-        status = classify(similarity)
+    for variant in generated.itertuples(index=False):
+        changed = variant.transformed != original_text
+        score = (
+            float(similarity_fn(model, original_text, variant.transformed))
+            if changed
+            else None
+        )
         rows.append({
-            "type": attack.type,
-            "text": attack.adversarial,
-            "similarity": float(similarity),
-            "status": status,
+            "transformation": variant.transformation,
+            "original_text": original_text,
+            "transformed_text": variant.transformed,
+            "changed": changed,
+            "model_name": model_name,
+            "cosine_similarity": score,
         })
 
-        print(f"[{attack.type.upper()}]")
-        print(f"Text: {attack.adversarial}")
-        print(f"Similarity: {similarity:.3f} -> {status}")
-        print("-" * 50)
-
     results = pd.DataFrame(rows)
-    metrics = compute_metrics(results)
+    summary = summarize_similarity_preservation(
+        results,
+        group_column="transformation",
+        changed_column="changed",
+        similarity_column="cosine_similarity",
+    )
 
-    tp, fp, tn, fn, accuracy, robustness = metrics
-    print("\nFINAL METRICS")
-    print(f"TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}")
-    print(f"Accuracy: {accuracy:.3f}")
-    print(f"Robustness Score: {robustness:.3f}")
-
-    return results, metrics
+    print("\nSimilarity-preservation diagnostic (not attack detection)")
+    print(f"Embedding model/checkpoint: {model_name}")
+    print(summary.to_string(index=False))
+    return results, summary

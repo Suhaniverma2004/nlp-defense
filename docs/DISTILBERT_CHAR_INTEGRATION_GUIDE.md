@@ -3,13 +3,16 @@ Integration Guide: Character-Aware DistilBERT Model
 ====================================================
 
 This document provides guidelines for using the character-aware DistilBERT model
-in your robustness evaluation pipeline.
+in downstream NLP experiments.
 
 ## Overview
 
-The Character-Aware DistilBERT model combines token-level and character-level 
-embeddings to improve robustness against tokenization-level adversarial attacks 
-(unicode exploits, emoji perturbations, whitespace attacks).
+Similarity-preservation scores are representation diagnostics only. They do not establish adversarial attack detection: low similarity does not prove an attack was detected, and high similarity does not prove safety. Detection evaluation requires a trained classifier, explicit ground-truth labels, and a defined protocol. See [Similarity Diagnostics](./SIMILARITY_DIAGNOSTICS.md).
+
+The Character-Aware DistilBERT model combines token-level and character-level
+embeddings for experiments involving tokenization-level text transformations
+(Unicode, emoji, and whitespace changes). The architecture alone does not
+establish improved robustness; that requires a separately designed evaluation.
 
 ## Quick Start
 
@@ -87,11 +90,11 @@ embeddings to improve robustness against tokenization-level adversarial attacks
 
 ### Fusion Methods
 
-**'concat' (recommended for maximum robustness)**
+**'concat' (higher-capacity fusion option)**
     - Concatenates token and character embeddings
     - Projects back to 768 dimensions with FC layers
     - More parameters but better feature fusion
-    - Default choice for adversarial robustness
+    - More fusion parameters; task benefits need empirical evaluation
 
 **'add' (simpler, less parameters)**
     - Simple element-wise addition
@@ -191,9 +194,9 @@ The model returns a dictionary with:
         'distilbert_outputs': object            # Full DistilBERT outputs object
     }
 
-## Robustness Evaluation
+## Transformation Diagnostics
 
-The model is designed to be robust against:
+The model can be evaluated on text transformations such as:
 
 1. **Unicode Attacks**
    - Similar-looking unicode characters
@@ -208,8 +211,8 @@ The model is designed to be robust against:
    - Non-breaking spaces
    - Multiple consecutive spaces
 
-The character-level encoder captures these variations where token-level encoding
-might fail or normalize them away.
+Character-level features may represent these variations differently from
+token-level features. This design does not itself establish detection or safety.
 
 ## Performance Considerations
 
@@ -225,7 +228,7 @@ might fail or normalize them away.
 Approximate timing (batch_size=4, seq_len=128, on GPU):
 - Forward pass: 50-100ms
 - vs DistilBERT alone: 20-40ms
-- Overhead: 2-3x (acceptable for robustness gains)
+- Overhead: 2-3x (evaluate any task benefit separately)
 
 ## Troubleshooting
 
@@ -251,7 +254,7 @@ Approximate timing (batch_size=4, seq_len=128, on GPU):
 **Solution 3:** Use gradient checkpointing
     model.distilbert.gradient_checkpointing_enable()
 
-### Issue: Poor Adversarial Robustness
+### Issue: Poor Downstream Task Performance
 
 **Check:**
 1. Character encoder is receiving diverse character inputs
@@ -291,7 +294,7 @@ If you use this model in research, please cite:
 
 1. **Data Preparation**: Create dataset with adversarial examples
 2. **Training**: Fine-tune model on task-specific data
-3. **Evaluation**: Test robustness against adversarial attacks
+3. **Evaluation**: Evaluate a trained task model with labeled held-out data
 4. **Comparison**: Compare with baseline DistilBERT
 5. **Deployment**: Integrate into production system
 

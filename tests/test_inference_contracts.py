@@ -1,11 +1,10 @@
 import torch
-import pytest
 from transformers import DistilBertConfig
 
 from experiment.test_classifier import run_smoke_test
 from src.char_vocab import build_char_vocab
 from src.charaware_classifier import CharAwareClassifier
-from src.chatbot_security import run_chatbot_security
+from src import phase5_model
 from src.phase5_model import prepare_inputs
 
 
@@ -67,28 +66,31 @@ def test_classifier_smoke_script_runs_with_local_model_and_tokenizer():
     assert logits.shape == (1, 2)
 
 
-def test_chatbot_integration_uses_attack_dataframe_and_metric_contract():
-    sentinel_model = object()
+def test_compute_similarity_can_compare_raw_text_without_defense(monkeypatch):
+    calls = []
 
-    def local_similarity(model, clean_text, attacked_text):
-        assert model is sentinel_model
-        return 1.0 if clean_text == attacked_text else 0.4
+    def local_prepare(text, apply_defense=True):
+        calls.append((text, apply_defense))
+        vector = [1.0, 0.0] if text == "original" else [0.0, 1.0]
+        return (
+            torch.tensor([vector]),
+            torch.zeros((1, 2, 1), dtype=torch.long),
+            torch.ones((1, 2), dtype=torch.long),
+        )
 
-    results, metrics = run_chatbot_security(
-        "simple input",
-        model=sentinel_model,
-        similarity_fn=local_similarity,
+    class LocalModel:
+        def eval(self):
+            return self
+
+        def __call__(self, input_ids, char_ids, attention_mask):
+            return input_ids
+
+    monkeypatch.setattr(phase5_model, "prepare_inputs", local_prepare)
+    monkeypatch.setattr(phase5_model, "get_sentence_embedding", lambda outputs, mask: outputs)
+
+    similarity = phase5_model.compute_similarity(
+        LocalModel(), "original", "transformed", apply_defense=False
     )
 
-    assert set(("type", "text", "similarity", "status")).issubset(results.columns)
-    assert "clean" in results["type"].values
-
-    tp, fp, tn, fn, accuracy, robustness = metrics
-    expected_tp = int(((results["type"] != "clean") & (results["status"] == "FAIL")).sum())
-    expected_fp = int(((results["type"] == "clean") & (results["status"] == "FAIL")).sum())
-    expected_tn = int(((results["type"] == "clean") & (results["status"] == "PASS")).sum())
-    expected_fn = int(((results["type"] != "clean") & (results["status"] == "PASS")).sum())
-
-    assert (tp, fp, tn, fn) == (expected_tp, expected_fp, expected_tn, expected_fn)
-    assert accuracy == pytest.approx((tp + tn) / len(results))
-    assert robustness == pytest.approx(tp / (tp + fn))
+    assert similarity == 0.0
+    assert calls == [("original", False), ("transformed", False)]
