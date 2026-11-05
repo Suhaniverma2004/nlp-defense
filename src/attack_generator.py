@@ -77,24 +77,36 @@ def mixed_attack(text):
 
 # ------------------ MAIN GENERATOR ------------------
 
-def generate_attacks(clean_prompts):
+def generate_transformations(original_texts):
+    """Generate text variants with neutral column names for diagnostics."""
+    if isinstance(original_texts, str):
+        original_texts = [original_texts]
+
     data = []
 
-    for prompt in clean_prompts:
+    for original in original_texts:
 
-        # Clean
-        data.append(("clean", prompt, prompt))
+        data.append(("clean", original, original))
 
-        # Core attack categories (for paper)
-        data.append(("prompt_injection", prompt, prompt_injection_attack(prompt)))
-        data.append(("obfuscation", prompt, obfuscation_attack(prompt)))
-        data.append(("tokenization", prompt, tokenization_attack(prompt)))
-        data.append(("mixed", prompt, mixed_attack(prompt)))
+        # Text transformations used by the existing research fixtures.
+        data.append(("prompt_injection", original, prompt_injection_attack(original)))
+        data.append(("obfuscation", original, obfuscation_attack(original)))
+        data.append(("tokenization", original, tokenization_attack(original)))
+        data.append(("mixed", original, mixed_attack(original)))
 
-        # Existing strong attacks (keep for robustness)
-        data.append(("unicode", prompt, unicode_attack(prompt)))
-        data.append(("emoji_insertion", prompt, strong_emoji_attack(prompt)))
-        data.append(("emoji_replacement", prompt, emoji_replacement_attack(prompt)))
-        data.append(("whitespace", prompt, whitespace_attack(prompt)))
+        data.append(("unicode", original, unicode_attack(original)))
+        data.append(("emoji_insertion", original, strong_emoji_attack(original)))
+        data.append(("emoji_replacement", original, emoji_replacement_attack(original)))
+        data.append(("whitespace", original, whitespace_attack(original)))
 
-    return pd.DataFrame(data, columns=["type", "clean", "adversarial"])
+    return pd.DataFrame(data, columns=["transformation", "original", "transformed"])
+
+
+def generate_attacks(clean_prompts):
+    """Compatibility wrapper retaining the historical dataset column names."""
+    transformations = generate_transformations(clean_prompts)
+    return transformations.rename(columns={
+        "transformation": "type",
+        "original": "clean",
+        "transformed": "adversarial",
+    })

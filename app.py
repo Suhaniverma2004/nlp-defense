@@ -1,203 +1,91 @@
-import streamlit as st
+"""Streamlit UI for pretrained-baseline similarity-preservation diagnostics."""
+
 import pandas as pd
-import torch
-import torch.nn.functional as F
+import streamlit as st
+from sklearn.metrics.pairwise import cosine_similarity
 
-from src.phase5_model import (
-    CharAwareModel,
-    prepare_inputs,
-    get_sentence_embedding
-)
+from src.attack_engine import TRANSFORMATIONS
+from src.evaluate_defense import MODEL_NAME, get_embedding
 
-from src.attack_engine import ATTACKS
-from src.composite_defense import is_composite
-from src.domain_classifier import detect_domain
-from src.domain_rules import apply_domain_rules
 
-# ---------------- CONFIG ----------------
 st.set_page_config(
-    page_title="LLM Security Dashboard",
+    page_title="Text Similarity Diagnostic",
     layout="wide",
-    page_icon="🛡️"
+    page_icon="🧪",
 )
 
-model = CharAwareModel()
-model.eval()
-
-BASE_THRESHOLD = 0.85
-
-
-# ---------------- UTILS ----------------
-
-def compute_similarity(text1, text2):
-    input_ids1, char_ids1, mask1 = prepare_inputs(text1)
-    input_ids2, char_ids2, mask2 = prepare_inputs(text2)
-
-    with torch.no_grad():
-        out1 = model(input_ids1, char_ids1, mask1)
-        out2 = model(input_ids2, char_ids2, mask2)
-
-    emb1 = get_sentence_embedding(out1, mask1)
-    emb2 = get_sentence_embedding(out2, mask2)
-
-    return F.cosine_similarity(emb1, emb2).item()
-
-def get_risk_level(score):
-
-    if score >= 0.90:
-        return "🟢 LOW"
-    elif score >= 0.75:
-        return "🟡 MEDIUM"
-    else:
-        return "🔴 HIGH"
-
-
-def get_attack_category(name):
-
-    name = name.lower()
-
-    if "prompt" in name:
-        return "Prompt Injection"
-    elif "obfuscation" in name or "unicode" in name:
-        return "Obfuscation Attack"
-    elif "whitespace" in name or "token" in name or "emoji" in name:
-        return "Tokenization Attack"
-    elif "mixed" in name:
-        return "Mixed Attack"
-    else:
-        return "Other"
-
-
-def status_color(status):
-    return "🟢" if "PASS" in status else "🔴"
-
-
-# ---------------- SIDEBAR ----------------
-st.sidebar.title("⚙️ Controls")
-
-selected_attacks = st.sidebar.multiselect(
-    "Select Attack Types",
-    list(ATTACKS.keys()),
-    default=list(ATTACKS.keys())
+st.title("Text Similarity Preservation Diagnostic")
+st.markdown(
+    f"Cosine similarity using the named pretrained baseline `{MODEL_NAME}` "
+    "(mean-pooled last hidden states)."
+)
+st.warning(
+    "This is a representation diagnostic, not attack detection. Low similarity "
+    "does not prove an attack was detected; high similarity does not prove an input is safe."
 )
 
-st.sidebar.markdown("---")
-st.sidebar.info("🛡️ This system evaluates robustness of LLMs against adversarial inputs.")
+selected_transformations = st.sidebar.multiselect(
+    "Select text transformations",
+    list(TRANSFORMATIONS),
+    default=list(TRANSFORMATIONS),
+)
+
+text = st.text_input("Original text", "I love data science")
+run = st.button("Run similarity diagnostic")
 
 
-# ---------------- HEADER ----------------
-st.title("🛡️ LLM Security & Robustness Dashboard")
-st.markdown("**Real-time adversarial attack detection and evaluation system**")
+def _cosine_similarity(left_text, right_text):
+    try:
+        left = get_embedding(left_text)
+        right = get_embedding(right_text)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to load or run the `{MODEL_NAME}` baseline. Ensure the model "
+            "is available in the Hugging Face cache or that network access is enabled. "
+            f"Details: {exc}"
+        ) from exc
+    return float(cosine_similarity(left, right)[0][0])
 
-st.markdown("---")
 
-# ---------------- INPUT ----------------
-text = st.text_input("💬 Enter User Input", "I love data science")
-
-run = st.button("🚀 Run Security Analysis")
-
-
-# ---------------- MAIN ----------------
 if run:
+    rows = []
+    try:
+        for name in selected_transformations:
+            transformed = TRANSFORMATIONS[name](text)
+            changed = transformed != text
+            rows.append({
+                "Transformation": name,
+                "Original text": text,
+                "Transformed text": transformed,
+                "Changed": changed,
+                "Cosine similarity": _cosine_similarity(text, transformed) if changed else None,
+            })
+    except RuntimeError as exc:
+        st.error(str(exc))
+        st.stop()
 
-    results = []
+    results = pd.DataFrame(rows, columns=[
+        "Transformation",
+        "Original text",
+        "Transformed text",
+        "Changed",
+        "Cosine similarity",
+    ])
+    changed_rows = results[results["Changed"]] if not results.empty else results
+    unchanged_count = int((~results["Changed"]).sum()) if not results.empty else 0
 
-    for name, attack_fn in ATTACKS.items():
-
-        if name not in selected_attacks:
-            continue
-
-        attacked = attack_fn(text)
-        score = compute_similarity(text, attacked)
-
-        threshold = 0.70 if is_composite(attacked) else BASE_THRESHOLD
-        status = "PASS" if score >= threshold else "FAIL"
-        domain = detect_domain(attacked)
-        decision = apply_domain_rules(domain, attacked, status)
-
-        results.append({
-            "Attack": name,
-            "Domain": domain, 
-            "Category": get_attack_category(name),
-            "Similarity": round(score, 3),
-            "Risk": get_risk_level(score),
-            "Threshold": threshold,
-            "Status": status,
-            "Decision": decision,  
-            "Attacked Text": attacked
-        })
-
-        results.insert(0, {
-         "Attack": "clean",
-         "Category": "None",
-        "Similarity": 1.0,
-        "Threshold": BASE_THRESHOLD,
-        "Risk": "🟢 LOW",
-        "Status": "PASS",
-        "Attacked Text": text
-        })
-
-
-    df = pd.DataFrame(results)
-
-    # ---------------- METRICS CARDS ----------------
-    pass_count = sum(df["Status"] == "PASS")
-    total = len(df)
-    robustness = pass_count / total * 100
-
-    TP = FP = TN = FN = 0
-
-    for _, row in df.iterrows():
-        is_attack = row["Attack"] != "clean"
-        pred_attack = row["Status"] == "FAIL"
-
-        if is_attack and pred_attack:
-            TP += 1
-        elif is_attack and not pred_attack:
-            FN += 1
-        elif not is_attack and not pred_attack:
-            TN += 1
-        else:
-            FP += 1
-
-    accuracy = (TP + TN) / (TP + TN + FP + FN + 1e-6)
-
+    st.subheader("Similarity summary")
     col1, col2, col3 = st.columns(3)
-
-    col1.metric("🛡️ Robustness", f"{robustness:.2f}%")
-    col2.metric("📊 Accuracy", f"{accuracy:.3f}")
-    col3.metric("⚠️ Failures", f"{total - pass_count}")
-
-    st.markdown("---")
-
-    # ---------------- TABLE ----------------
-    st.subheader("📊 Attack Analysis")
-
-    styled_df = df.copy()
-    styled_df["Status"] = styled_df["Status"].apply(
-        lambda x: f"{status_color(x)} {x}"
+    col1.metric("Changed variants", int(len(changed_rows)))
+    col2.metric("Unchanged variants", unchanged_count)
+    mean_similarity = changed_rows["Cosine similarity"].mean() if not changed_rows.empty else None
+    col3.metric(
+        "Mean cosine similarity (changed only)",
+        "—" if mean_similarity is None else f"{mean_similarity:.4f}",
     )
 
-    st.dataframe(styled_df, use_container_width=True)
-
-    # ---------------- INSIGHTS ----------------
-    st.markdown("---")
-    st.subheader("🧠 Insights")
-
-    best = df.loc[df["Similarity"].idxmax()]
-    worst = df.loc[df["Similarity"].idxmin()]
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.success(f"🏆 Best Defense: {best['Attack']} ({best['Similarity']})")
-
-    with col2:
-        st.error(f"⚠️ Weakest Defense: {worst['Attack']} ({worst['Similarity']})")
-
-    # ---------------- DETAILS ----------------
-    with st.expander("🔍 View Detailed Outputs"):
-        for _, row in df.iterrows():
-            st.markdown(f"**{row['Attack']} ({row['Category']})**")
-            st.code(row["Attacked Text"])
-            st.markdown("---")
+    st.caption(
+        "Unchanged variants are reported separately and excluded from the mean. "
+        "The mean is the arithmetic average of cosine similarities for changed variants."
+    )
+    st.dataframe(results, use_container_width=True)

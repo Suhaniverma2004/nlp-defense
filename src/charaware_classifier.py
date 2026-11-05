@@ -14,10 +14,10 @@ class CharAwareClassifier(nn.Module):
     classification head.
     """
 
-    def __init__(self, num_classes=2):
+    def __init__(self, num_classes=2, config=None):
         super().__init__()
 
-        self.encoder = CharAwareModel()
+        self.encoder = CharAwareModel(config=config)
 
         self.dropout = nn.Dropout(0.2)
 

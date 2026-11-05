@@ -13,9 +13,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from src.phase5_model import (
-    tokenizer,
-    char_vocab
+    get_tokenizer,
+    char_vocab,
 )
+from src.char_vocab import get_char_idx
 
 # -------------------------------------------------------
 # Configuration
@@ -48,10 +49,7 @@ def build_char_ids(tokens):
 
         chars = list(token)
 
-        ids = [
-            char_vocab.get(c, 0)
-            for c in chars[:CHAR_MAX_LEN]
-        ]
+        ids = [get_char_idx(c, char_vocab) for c in chars[:CHAR_MAX_LEN]]
 
         ids += [0] * (CHAR_MAX_LEN - len(ids))
 
@@ -79,6 +77,7 @@ class SST2Dataset(Dataset):
         sentence = self.df.loc[idx, "sentence"]
         label = int(self.df.loc[idx, "label"])
 
+        tokenizer = get_tokenizer()
         encoding = tokenizer(
             sentence,
             truncation=True,

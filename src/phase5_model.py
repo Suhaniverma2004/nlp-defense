@@ -1,14 +1,20 @@
 import torch
 import torch.nn as nn
+from functools import lru_cache
 from transformers import DistilBertModel, DistilBertTokenizer
-from src.char_vocab import build_char_vocab
+from src.char_vocab import build_char_vocab, get_char_idx
 
 # 🔥 NEW IMPORTS
 from src.sanitization import sanitize as sanitize_text
 from src.composite_defense import composite_clean, is_composite
 
-tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
 char_vocab = build_char_vocab()
+
+
+@lru_cache(maxsize=1)
+def get_tokenizer():
+    """Load the production tokenizer only when text tokenization is requested."""
+    return DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
 
 # ---------------- CHAR CNN ----------------
 class CharCNN(nn.Module):
@@ -42,11 +48,16 @@ class CharCNN(nn.Module):
 
 # ---------------- MAIN MODEL ----------------
 class CharAwareModel(nn.Module):
-    def __init__(self):
+    def __init__(self, config=None, model_name="distilbert-base-uncased"):
         super().__init__()
-        self.bert = DistilBertModel.from_pretrained("distilbert-base-uncased")
-        self.char_encoder = CharCNN(len(char_vocab))
-        self.fusion = nn.Linear(768 * 2, 768)
+        self.bert = (
+            DistilBertModel(config)
+            if config is not None
+            else DistilBertModel.from_pretrained(model_name)
+        )
+        hidden_size = self.bert.config.dim
+        self.char_encoder = CharCNN(len(char_vocab), out_dim=hidden_size)
+        self.fusion = nn.Linear(hidden_size * 2, hidden_size)
 
     def forward(self, input_ids, char_ids, attention_mask):
         token_embeds = self.bert.embeddings(input_ids)
@@ -76,12 +87,14 @@ def process_text(text):
 def prepare_inputs(text,
     max_length=128,
     char_max_len=20,
-    apply_defense=True):
+    apply_defense=True,
+    tokenizer_instance=None):
 
     if apply_defense:
         text = process_text(text)
 
-    encoding = tokenizer(
+    text_tokenizer = tokenizer_instance or get_tokenizer()
+    encoding = text_tokenizer(
         text,
         padding="max_length",
         truncation=True,
@@ -92,7 +105,7 @@ def prepare_inputs(text,
     input_ids = encoding["input_ids"]
     attention_mask = encoding["attention_mask"]
 
-    tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
+    tokens = text_tokenizer.convert_ids_to_tokens(input_ids[0])
 
     char_ids = []
     for token in tokens:
@@ -104,7 +117,7 @@ def prepare_inputs(text,
         token = token.replace("##", "")
         chars = list(token)
 
-        ids = [char_vocab.get(c, 0) for c in chars[:char_max_len]]
+        ids = [get_char_idx(c, char_vocab) for c in chars[:char_max_len]]
         ids += [0] * (char_max_len - len(ids))
         char_ids.append(ids)
 
@@ -122,15 +135,21 @@ def get_sentence_embedding(output, attention_mask):
 
 
 # ---------------- 🔥 ADD THIS (IMPORTANT FOR PIPELINE) ----------------
-def compute_similarity(model, text1, text2):
+def compute_similarity(model, text1, text2, apply_defense=True):
 
     model.eval()
 
     with torch.no_grad():
 
         # Process both texts
-        input_ids1, char_ids1, mask1 = prepare_inputs(text1)
-        input_ids2, char_ids2, mask2 = prepare_inputs(text2)
+        input_ids1, char_ids1, mask1 = prepare_inputs(
+            text1,
+            apply_defense=apply_defense,
+        )
+        input_ids2, char_ids2, mask2 = prepare_inputs(
+            text2,
+            apply_defense=apply_defense,
+        )
 
         out1 = model(input_ids1, char_ids1, mask1)
         out2 = model(input_ids2, char_ids2, mask2)

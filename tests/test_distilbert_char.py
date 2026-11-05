@@ -16,8 +16,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import torch
 import unittest
+from unittest.mock import patch
+from transformers import DistilBertConfig, DistilBertModel
 from src.distilbert_char_model import DistilBertCharModel, create_char_aware_model
 from src.char_vocab import build_char_vocab
+
+
+def _local_distilbert():
+    """Build a small DistilBERT with the production hidden width and no download."""
+    config = DistilBertConfig(
+        vocab_size=30522,
+        max_position_embeddings=64,
+        n_layers=1,
+        dim=768,
+        hidden_dim=128,
+        n_heads=12,
+    )
+    return DistilBertModel(config)
+
+
+def _patch_pretrained_loader(test_case):
+    test_case._pretrained_patch = patch.object(
+        DistilBertModel,
+        "from_pretrained",
+        side_effect=lambda *args, **kwargs: _local_distilbert(),
+    )
+    test_case._pretrained_patch.start()
 
 
 class TestDistilBertCharModel(unittest.TestCase):
@@ -29,6 +53,11 @@ class TestDistilBertCharModel(unittest.TestCase):
         cls.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         cls.char_vocab = build_char_vocab()
         cls.char_vocab_size = len(cls.char_vocab)
+        _patch_pretrained_loader(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._pretrained_patch.stop()
         
     def setUp(self):
         """Set up for each test."""
@@ -279,6 +308,11 @@ class TestDistilBertCharModelIntegration(unittest.TestCase):
     def setUpClass(cls):
         """Set up test fixtures."""
         cls.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        _patch_pretrained_loader(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._pretrained_patch.stop()
     
     def test_full_pipeline(self):
         """Test a complete pipeline with model creation and inference."""
