@@ -1,36 +1,58 @@
-from attack_generator import generate_all_attacks
-from phase5_model import compute_similarity
-from evaluate_defense import compute_metrics
+"""Command-line chatbot security evaluation helpers."""
+
+import pandas as pd
+
+from src.attack_generator import generate_attacks
+from src.evaluate_defense import compute_metrics
+from src.phase5_model import CharAwareModel, compute_similarity
+
 
 THRESHOLD = 0.85
 
-def classify(sim):
-    return "PASS" if sim >= THRESHOLD else "FAIL"
 
-def run_chatbot_security(user_input):
+def classify(similarity):
+    return "PASS" if similarity >= THRESHOLD else "FAIL"
 
-    attacks = generate_all_attacks(user_input)
-    results = {}
 
-    print("\n🔐 CHATBOT SECURITY SYSTEM\n")
+def run_chatbot_security(user_input, model=None, similarity_fn=None):
+    """Evaluate generated variants using the shared model and metric contracts.
 
-    for attack_type, attacked_text in attacks.items():
+    ``model`` and ``similarity_fn`` can be supplied by callers and tests. The
+    pretrained model and tokenizer are loaded only when real inference runs.
+    Returns the per-attack results and ``compute_metrics`` summary.
+    """
+    if similarity_fn is None:
+        similarity_fn = compute_similarity
+        if model is None:
+            model = CharAwareModel()
 
-        sim = compute_similarity(user_input, attacked_text)
-        label = classify(sim)
+    attacks = generate_attacks([user_input])
+    rows = []
 
-        is_attack = attack_type != "clean"
+    print("\nCHATBOT SECURITY SYSTEM\n")
 
-        results[attack_type] = (sim, label, is_attack)
+    for attack in attacks.itertuples(index=False):
+        similarity = similarity_fn(model, user_input, attack.adversarial)
+        status = classify(similarity)
+        rows.append({
+            "type": attack.type,
+            "text": attack.adversarial,
+            "similarity": float(similarity),
+            "status": status,
+        })
 
-        print(f"[{attack_type.upper()}]")
-        print(f"Text: {attacked_text}")
-        print(f"Similarity: {sim:.3f} → {label}")
-        print("-"*50)
+        print(f"[{attack.type.upper()}]")
+        print(f"Text: {attack.adversarial}")
+        print(f"Similarity: {similarity:.3f} -> {status}")
+        print("-" * 50)
 
-    TP, FP, TN, FN, acc, rob = compute_metrics(results)
+    results = pd.DataFrame(rows)
+    metrics = compute_metrics(results)
 
-    print("\n📊 FINAL METRICS")
-    print(f"TP: {TP}, FP: {FP}, TN: {TN}, FN: {FN}")
-    print(f"Accuracy: {acc:.3f}")
-    print(f"Robustness Score: {rob:.3f}")
+    tp, fp, tn, fn, accuracy, robustness = metrics
+    print("\nFINAL METRICS")
+    print(f"TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}")
+    print(f"Accuracy: {accuracy:.3f}")
+    print(f"Robustness Score: {robustness:.3f}")
+
+    return results, metrics

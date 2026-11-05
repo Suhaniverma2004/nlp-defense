@@ -12,16 +12,28 @@ from src.composite_defense import composite_clean, is_composite  # 🔥 NEW
 
 MODEL_NAME = "distilbert-base-uncased"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME)
-model.eval()
+tokenizer = None
+model = None
 
 THRESHOLD = 0.85  # base threshold
 
 
 # ---------------- EMBEDDING ----------------
+def _get_backbone():
+    """Load baseline weights only when embedding inference is requested."""
+    global tokenizer, model
+
+    if tokenizer is None:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if model is None:
+        model = AutoModel.from_pretrained(MODEL_NAME)
+        model.eval()
+    return tokenizer, model
+
+
 def get_embedding(text: str):
-    inputs = tokenizer(
+    text_tokenizer, encoder = _get_backbone()
+    inputs = text_tokenizer(
         text,
         return_tensors="pt",
         truncation=True,
@@ -29,7 +41,7 @@ def get_embedding(text: str):
         padding=True
     )
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = encoder(**inputs)
     return outputs.last_hidden_state.mean(dim=1).numpy()
 
 
