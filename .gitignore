@@ -143,3 +143,5 @@ models/
 
 # Generated paper PDF
 paper_revised.pdf
+# Generated processed datasets
+data/processed/
