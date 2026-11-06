@@ -9,8 +9,8 @@ does not report CUDA results.
 
 ## Repository baseline and model identity
 
-The notebook is based on the inspected merged Milestone 2.3 main commit
-`efa0a1ac2aa5dfbccaa8e14b17a193b71e0713e2` and checks the runtime packages
+The notebook source is pinned to merged main commit
+`337dba2bad410bcad073eccad68ddeaba40084fa` and checks the runtime packages
 before training. A Kaggle source input without Git metadata must include
 `MILESTONE_2_4_SOURCE_COMMIT.txt` containing that SHA. The model and tokenizer revision is pinned to
 `12040accade4e8a0f71eabdb258fecc2e7e948be` for both
@@ -55,7 +55,7 @@ Only the split manifest, runtime report, experiment
 configs, histories, evaluation reports, and complete checkpoint run
 directories are exported.
 
-## Dependency compatibility and installation policy
+## Dependency profiles and installation policy
 
 The repository pins PyTorch 2.10.0, Transformers 5.2.0, and Tokenizers 0.22.2;
 the locally verified environment used those versions. Repository CI runs
@@ -66,21 +66,55 @@ must be recorded from the live session. See the [Kaggle Docker image
 repository](https://github.com/Kaggle/docker-python) and [Kaggle package
 environment documentation](https://www.kaggle.com/docs/packages).
 
-The notebook fails before model execution if Python is below 3.10, CUDA is
-unavailable, or the required PyTorch/Transformers/Tokenizers versions do not
-match the tested pins. It prints all observed pinned-package versions. It does
-not install or upgrade packages automatically. Do not run `pip install -r
-requirements.txt` over Kaggle's live GPU image: that can replace the Kaggle
-PyTorch/CUDA build and alter transitive packages. If a pin differs, stop and
-review compatibility first. The safe setup is fail-closed: record Kaggle's
-Python, CUDA-enabled PyTorch build, CUDA runtime, and GPU inventory; select a
-runtime compatible with the repository's tested package pins; and never
-reinstall PyTorch from the generic requirements file. If only the Transformers
-stack differs, prepare and review a version-resolved installation plan against
-the already installed PyTorch/CUDA build, install only that reviewed package
-set, restart the kernel, then rerun package, import, `pip check`, and CUDA
-smoke checks. This notebook intentionally does not automate a Kaggle package
-installation because the live image version has not been verified here.
+The **locally validated profile** remains the unchanged `requirements.txt`
+environment: Python 3.14.2, PyTorch 2.10.0, Transformers 5.2.0 and Tokenizers
+0.22.2, with its resolved packages recorded in checkpoints. The separate
+**Kaggle T4 candidate profile** is named
+`kaggle-t4x2-py3.13-torch2.11.0+cu130-transformers5.20.2-tokenizers0.23.3-v1`
+and verifies the following exact versions before model execution:
+
+| Component | Candidate version |
+|---|---:|
+| Python | 3.13.16 |
+| PyTorch | 2.11.0+cu130 |
+| CUDA runtime reported by PyTorch | 13.0 |
+| Transformers | 5.20.2 |
+| Tokenizers | 0.23.3 |
+| NumPy | 2.1.3 |
+| pandas | 2.3.3 |
+| scikit-learn | 1.6.1 |
+
+This profile is still labeled **candidate**; local validation does not certify
+Kaggle execution. The exact check includes the PyTorch CUDA build suffix and
+fails closed on every mismatch. It does not install or upgrade packages,
+downgrade packages, run `pip install -r requirements.txt`, or replace Kaggle's
+CUDA-enabled PyTorch. Do not bypass the check. A newly observed Kaggle image
+requires a new reviewed profile or a deliberate profile update, not an
+unrecorded exception.
+
+Before full training, run the notebook cells in order: (1) select T4 x2 and
+record both devices, capacities, driver and selected `cuda:0`; (2) pass exact
+candidate package checks and the CUDA tensor probe; (3) identify the repository
+at immutable commit `337dba2bad410bcad073eccad68ddeaba40084fa`; (4) prepare and
+verify split provenance while loading only train and validation; (5) resolve
+the exact model/tokenizer revision; (6) resolve effective precision and shared
+settings; (7) explicitly opt into bounded runtime probes. These probes check
+Unicode/emoji alignment, whitespace gaps, literal and structural special
+tokens, baseline/canonical forward-backward updates, FP16 autocast and
+GradScaler, checkpoint integrity, offline reload/inference, and epoch-boundary
+recovery/resume using the existing project APIs. To execute this stage, set
+`RUN_CUDA_SMOKE_TESTS=True` in the first notebook code cell while leaving
+`RUN_FULL_BASELINE_TRAINING=False` and
+`RUN_FULL_CANONICAL_TRAINING=False`. A failed or incomplete probe keeps full
+training blocked even if a training opt-in is later set. The profile remains
+labeled candidate after the probe run pending review of its evidence.
+
+The exported runtime provenance records the full resolved package inventory,
+NVIDIA driver, both GPU identities and memory capacities, selected device,
+repository commit, immutable revisions, split manifest and hashes, effective
+precision, shared training config and probe results. The manifest includes
+held-out split hashes, but this workflow does not load or inspect held-out test
+rows. Baseline/canonical comparison remains whole-system only.
 
 The model-assets cell is local-cache-only by default. Set the explicit
 `ALLOW_PINNED_ASSET_DOWNLOAD` switch only when Internet access is enabled and
@@ -174,22 +208,39 @@ in notebook cells or exported artifacts.
 
 ## Verification status and remaining Kaggle checks
 
-Local validation covers the notebook JSON structure and Python cell syntax.
-The existing project tests and CPU environment do not validate a Kaggle GPU
-runtime. The following checks remain to be run in the actual Kaggle T4 x2
-session before full training:
+Local validation covers notebook syntax and profile logic only. It does not
+validate the candidate against Kaggle hardware. The following checks remain
+to be run in the actual Kaggle T4 x2 session before full training:
 
-1. Confirm runtime Python and exact PyTorch, Transformers, and Tokenizers
-   versions; confirm the PyTorch CUDA build imports successfully.
-2. Confirm two T4 devices are visible, record both memory capacities, and
-   verify all model parameters and batches stay on `cuda:0`.
-3. Confirm pinned model/tokenizer revisions resolve and their commit metadata
-   matches the requested SHA.
-4. Run both bounded CUDA smoke tests, offline checkpoint reloads, and copied
-   epoch-boundary recovery; inspect peak memory and effective precision.
-5. Run matched baseline/canonical training only after the smoke and recovery
-   checks, inspect the shared-settings manifest, and archive the artifacts.
+1. Pass the exact candidate package and driver/GPU inventory checks; confirm
+   both T4s and selected `cuda:0`.
+2. Confirm the pinned fast-tokenizer/model revision resolves and run Unicode,
+   emoji, whitespace/gap and special-token alignment probes.
+3. Run baseline and canonical CUDA forward/backward/optimizer probes and the
+   FP16 autocast/GradScaler probe; inspect finite values and device placement.
+4. Save and integrity-check both checkpoints, reload them offline, perform
+   inference, and recover/resume completed epoch snapshots.
+5. Review the saved runtime and split provenance. Only then consider enabling
+   matched baseline/canonical full training.
 
-No CUDA execution, Kaggle persistence, full training, test-set evaluation,
-performance improvement, or adversarial robustness result is claimed by this
-milestone.
+No actual Kaggle model training, checkpoint compatibility, CUDA training,
+Kaggle persistence, full training, test-set evaluation, performance
+improvement, or adversarial robustness result is claimed until these checks
+are run and reviewed.
+
+
+## Incremental validation evidence and training authorization
+
+The repository setup cell creates `validation_report.json` before environment checks and before any candidate probe. The report maintains append-only validation runs; every mandatory probe begins as `pending`, is persisted as `running`, then becomes `passed` or `failed`. A failure record contains the probe name, exception type, concise message, UTC timestamp, and SHA-256 validation-context fingerprint. Exceptions are re-raised, and the report is not a performance-results file. A successful export includes both `validation_report.json` and its current status in `runtime_report.json` and `workflow_config.json`. If a reported probe fails, the notebook attempts to write `runtime_report.json` and a failure snapshot ZIP before re-raising. The incremental report also remains in its session artifact directory if export is unavailable.
+
+The context fingerprint uses canonical sorted-key JSON and SHA-256. It binds the exact candidate profile and installed package inventory, GPU/device/CUDA/driver metadata, repository commit and relevant source-tree digest, immutable model/tokenizer identifiers and revisions, the dataset split manifest and hashes, and effective training settings (including sequence bounds, microbatch/effective batch size, accumulation, optimizer, scheduler, precision, epoch count, and validation interval). It excludes transient paths and timestamps. Both baseline and canonical training gates rebuild this context from the current session and require it to match the active report run and every mandatory probe result. A changed or incomplete context requires a fresh smoke validation.
+
+This fingerprint detects stale or mismatched execution evidence; it does not prove that the Kaggle runtime is trustworthy, that filesystem writes survive power loss, or that training results are scientifically valid. JSON replacement uses a same-directory temporary file and `os.replace` where supported. Atomic visibility and durability depend on the filesystem; mounted/network storage and sudden power loss may not provide the same guarantees.
+
+## Execution-context binding and smoke authorization
+
+The candidate notebook builds one authoritative execution context immediately before validation. It recomputes the exact shared training settings, resolves the effective autocast dtype, checks cached `SHARED`/precision/dtype values, and verifies both the `torch.device("cuda:0")` object and active CUDA index. Any stale notebook variable is rejected before a probe can start. The context fingerprint includes the current source-tree digest, exact runtime/package and GPU/driver metadata, repository commit, immutable model/tokenizer revisions, dataset/split manifest, complete `TrainingConfig` defaults and shared settings, effective precision, and the explicitly bounded smoke overrides.
+
+Both baseline and canonical smoke runs construct their `TrainingConfig` from the validated context. The only smoke overrides are two epochs and four examples per split; each is represented in the fingerprint, and the output directory is treated as a non-semantic location. The notebook checks the constructed dataclass against the expected context immediately before training. CUDA scaler/autocast uses that same resolved dtype and device. Each full-training path recomputes the current context at its gate and requires a complete successful report with the identical fingerprint. Editing settings, source, data manifests, package/runtime metadata, model revisions, or device invalidates prior evidence.
+
+This deterministic fingerprint establishes equality of the recorded inputs; it does not prove the underlying software, hardware, dataset labels, or experiment are scientifically valid. It cannot detect unrecorded external state or guarantee filesystem durability. Kaggle execution is still required to establish candidate-runtime compatibility.
