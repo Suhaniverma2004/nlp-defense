@@ -80,6 +80,52 @@ def test_notebook_pins_revision_cuda_zero_and_avoids_test_split() -> None:
     assert "whole-system" in markdown + code
 
 
+def test_notebook_selects_candidate_profile_and_fails_closed_on_exact_versions() -> None:
+    _, markdown, code = _notebook()
+    from src.kaggle_runtime import EXPECTED_VERSIONS
+
+    assert EXPECTED_VERSIONS == {
+        "python": "3.13.16",
+        "torch": "2.11.0+cu130",
+        "torch_cuda_runtime": "13.0",
+        "transformers": "5.20.2",
+        "tokenizers": "0.23.3",
+        "numpy": "2.1.3",
+        "pandas": "2.3.3",
+        "scikit-learn": "1.6.1",
+    }
+    assert "PROFILE_SELECTION = 'kaggle-t4-candidate'" in code
+    assert "validate_candidate_runtime" in code
+    assert "resolved_package_inventory" in code
+    assert "nvidia_driver_version" in code
+    assert "profile_status':'candidate'" in code
+    assert "pip install" not in code.lower()
+
+
+def test_notebook_full_training_requires_context_bound_probe_report() -> None:
+    _, markdown, code = _notebook()
+    assert "RUN_CUDA_SMOKE_TESTS = False" in code
+    assert "VALIDATION_RUN_ID = None" in code
+    assert "start_probe_run(REPORT_PATH,context)" in code
+    assert "validation_context_fingerprint(context)" in code
+    assert "run_reported_probe(REPORT_PATH,VALIDATION_RUN_ID,name,fn)" in code
+    assert "complete_probe_run(REPORT_PATH,VALIDATION_RUN_ID)" in code
+    assert "CANDIDATE_PROBE_RESULTS" not in code
+    assert "require_full_training_gate(profile,REPORT_PATH,VALIDATION_RUN_ID,context)" in code
+    assert "require_current_candidate_gate()" in code
+    assert "source_tree_sha256" in code
+    assert "verify_source_partition('literal [CLS] content'" in code
+    assert "RUN_FULL_BASELINE_TRAINING = False" in code
+    assert "RUN_FULL_CANONICAL_TRAINING = False" in code
+    assert "FP16 autocast" in markdown
+    assert "epoch-boundary recovery/resume" in markdown
+    assert "held-out test split is not loaded" in markdown
+    assert "validation_report.json" in code
+    assert "runtime_report['validation_report']" in code
+    assert "export_current_validation_report" in code
+    assert "nlp-defense-m24-validation-" in code
+
+
 def test_notebook_uses_kaggle_paths_and_does_not_install_dependencies() -> None:
     _, _, code = _notebook()
     assert "/kaggle/input" in code
@@ -222,3 +268,17 @@ def test_offline_checkpoint_mode_restores_prior_environment(monkeypatch) -> None
         assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
     assert os.environ["HF_HUB_OFFLINE"] == "0"
     assert "TRANSFORMERS_OFFLINE" not in os.environ
+
+
+def test_smoke_and_full_training_share_authoritative_execution_context() -> None:
+    _, _, code = _notebook()
+    assert "build_authoritative_execution_context(" in code
+    assert "build_smoke_training_config(execution['bindings'],out)" in code
+    assert "if asdict(cfg)!=expected_config" in code
+    assert "torch.cuda.current_device()!=0" in code
+    assert "effective_dtype" in code and "cached_dtype=effective_dtype" in code
+    assert "def require_current_candidate_gate():" in code
+    assert code.count("require_current_candidate_gate()") >= 3
+    assert "RUN_CUDA_SMOKE_TESTS = False" in code
+    assert "RUN_FULL_BASELINE_TRAINING = False" in code
+    assert "RUN_FULL_CANONICAL_TRAINING = False" in code
