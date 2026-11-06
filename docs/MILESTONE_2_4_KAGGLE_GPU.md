@@ -32,9 +32,11 @@ Kaggle input datasets are mounted read-only below `/kaggle/input`; writable
 notebook artifacts belong below `/kaggle/working`. The notebook first accepts
 an attached repository-source input at `/kaggle/input/nlp-defense-source`.
 It verifies the exact source commit using Git metadata or the commit marker.
-Otherwise it clones the repository into `/kaggle/working`, fetches the pinned
-commit, and checks it out detached when Kaggle Internet access is enabled. For
-an Internet-disabled session, attach a source dataset containing the repository
+Otherwise, set the notebook's explicit `ALLOW_REPOSITORY_CLONE = True` option
+to clone into `/kaggle/working`; the clone/fetch operation itself reports an
+actionable error if the network is unavailable. Cloning defaults to disabled.
+The clone fetches the pinned commit and checks it out detached. For an
+Internet-disabled session, attach a source dataset containing the repository
 tree and commit marker. Never write to `/kaggle/input`.
 
 The split builder reads the repository SST-2 train source and inspects the
@@ -83,8 +85,11 @@ installation because the live image version has not been verified here.
 The model-assets cell is local-cache-only by default. Set the explicit
 `ALLOW_PINNED_ASSET_DOWNLOAD` switch only when Internet access is enabled and
 the exact immutable revision is intended to be fetched. No mutable model ref
-is accepted. Checkpoint reload switches Hugging Face to offline mode and loads
-the tokenizer and weights only from the checkpoint bundle.
+is accepted. The same switch adds `--allow-hub-download` to both baseline and
+canonical CLI invocations; when false, both remain local-cache-only. Checkpoint
+reload temporarily switches Hugging Face to offline mode and restores the
+previous environment values immediately afterward, so later model loading is
+not unintentionally forced offline.
 
 ## Execution order
 
