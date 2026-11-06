@@ -282,3 +282,88 @@ def test_smoke_and_full_training_share_authoritative_execution_context() -> None
     assert "RUN_CUDA_SMOKE_TESTS = False" in code
     assert "RUN_FULL_BASELINE_TRAINING = False" in code
     assert "RUN_FULL_CANONICAL_TRAINING = False" in code
+
+
+SOURCE_COMMIT = "65391a2b0a715bdb67156df4aa1d5725c1edbc76"
+REQUIRED_SOURCE_COMMIT_PATHS = {
+    "notebooks/milestone_2_4_kaggle_gpu.ipynb",
+    "requirements.txt",
+    "src/alignment.py",
+    "src/byte_encoder.py",
+    "src/canonical_model.py",
+    "src/checkpointing.py",
+    "src/comparison.py",
+    "src/evaluation.py",
+    "src/kaggle_runtime.py",
+    "src/sst2_data.py",
+    "src/training.py",
+    "experiment/train_sst2.py",
+}
+
+
+def test_notebook_source_pin_matches_commit_with_required_runtime_modules() -> None:
+    _, _, code = _notebook()
+    assert f"REPOSITORY_COMMIT='{SOURCE_COMMIT}'" in code
+    root = NOTEBOOK.parents[1]
+    listed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", SOURCE_COMMIT],
+        cwd=root, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert REQUIRED_SOURCE_COMMIT_PATHS <= set(listed)
+
+
+def test_pinned_source_matches_required_checked_out_apis_without_future_source_changes() -> None:
+    root = NOTEBOOK.parents[1]
+    source_paths = sorted(
+        path for path in REQUIRED_SOURCE_COMMIT_PATHS
+        if path.startswith(("src/", "experiment/")) or path == "requirements.txt"
+    )
+    for relative in source_paths:
+        pinned_blob = subprocess.run(
+            ["git", "rev-parse", f"{SOURCE_COMMIT}:{relative}"],
+            cwd=root, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        current_blob = subprocess.run(
+            ["git", "rev-parse", f"HEAD:{relative}"],
+            cwd=root, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert current_blob == pinned_blob, relative
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", SOURCE_COMMIT, "HEAD", "--", "src", "experiment", "requirements.txt"],
+        cwd=root, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert changed == []
+
+
+def test_source_setup_rejects_a_commit_marker_that_differs_from_the_pin(tmp_path: Path) -> None:
+    setup = _notebook_function("setup_repository")
+    attached = tmp_path / "attached-source"
+    (attached / "src").mkdir(parents=True)
+    (attached / "src" / "training.py").write_text("# source fixture\n", encoding="utf-8")
+    (attached / "MILESTONE_2_4_SOURCE_COMMIT.txt").write_text("0" * 40, encoding="utf-8")
+    def no_git_metadata(args, **kwargs):
+        raise subprocess.CalledProcessError(1, args)
+
+    with pytest.raises(RuntimeError, match="must identify inspected commit"):
+        setup(attached, tmp_path / "unused", "main", SOURCE_COMMIT, allow_clone=False, run=no_git_metadata)
+
+
+def test_source_tree_digest_covers_checked_out_runtime_and_ignores_other_worktrees(tmp_path: Path) -> None:
+    import hashlib
+    digest = _notebook_function("source_tree_digest", {"hashlib": hashlib})
+    root = tmp_path / "checked-out-source"
+    for folder in ("src", "experiment", "notebooks"):
+        (root / folder).mkdir(parents=True, exist_ok=True)
+    (root / "src" / "training.py").write_text("training = 1\n", encoding="utf-8")
+    runtime = root / "src" / "kaggle_runtime.py"
+    runtime.write_text("runtime = 1\n", encoding="utf-8")
+    (root / "experiment" / "train_sst2.py").write_text("entrypoint = 1\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("torch==pinned\n", encoding="utf-8")
+    (root / "notebooks" / "milestone_2_4_kaggle_gpu.ipynb").write_text("{}\n", encoding="utf-8")
+    before = digest(root)
+    other_worktree = tmp_path / "unrelated-worktree"
+    (other_worktree / "src").mkdir(parents=True)
+    (other_worktree / "src" / "kaggle_runtime.py").write_text("runtime = unrelated\n", encoding="utf-8")
+    assert digest(root) == before
+    runtime.write_text("runtime = 2\n", encoding="utf-8")
+    assert digest(root) != before

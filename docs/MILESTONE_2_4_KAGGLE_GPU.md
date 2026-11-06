@@ -10,7 +10,7 @@ does not report CUDA results.
 ## Repository baseline and model identity
 
 The notebook source is pinned to merged main commit
-`337dba2bad410bcad073eccad68ddeaba40084fa` and checks the runtime packages
+`65391a2b0a715bdb67156df4aa1d5725c1edbc76` and checks the runtime packages
 before training. A Kaggle source input without Git metadata must include
 `MILESTONE_2_4_SOURCE_COMMIT.txt` containing that SHA. The model and tokenizer revision is pinned to
 `12040accade4e8a0f71eabdb258fecc2e7e948be` for both
@@ -95,7 +95,7 @@ unrecorded exception.
 Before full training, run the notebook cells in order: (1) select T4 x2 and
 record both devices, capacities, driver and selected `cuda:0`; (2) pass exact
 candidate package checks and the CUDA tensor probe; (3) identify the repository
-at immutable commit `337dba2bad410bcad073eccad68ddeaba40084fa`; (4) prepare and
+at immutable commit `65391a2b0a715bdb67156df4aa1d5725c1edbc76`; (4) prepare and
 verify split provenance while loading only train and validation; (5) resolve
 the exact model/tokenizer revision; (6) resolve effective precision and shared
 settings; (7) explicitly opt into bounded runtime probes. These probes check
@@ -244,3 +244,7 @@ The candidate notebook builds one authoritative execution context immediately be
 Both baseline and canonical smoke runs construct their `TrainingConfig` from the validated context. The only smoke overrides are two epochs and four examples per split; each is represented in the fingerprint, and the output directory is treated as a non-semantic location. The notebook checks the constructed dataclass against the expected context immediately before training. CUDA scaler/autocast uses that same resolved dtype and device. Each full-training path recomputes the current context at its gate and requires a complete successful report with the identical fingerprint. Editing settings, source, data manifests, package/runtime metadata, model revisions, or device invalidates prior evidence.
 
 This deterministic fingerprint establishes equality of the recorded inputs; it does not prove the underlying software, hardware, dataset labels, or experiment are scientifically valid. It cannot detect unrecorded external state or guarantee filesystem durability. Kaggle execution is still required to establish candidate-runtime compatibility.
+
+## Immutable source pairing
+
+The notebook checks out repository source commit `65391a2b0a715bdb67156df4aa1d5725c1edbc76`. This commit contains `src/kaggle_runtime.py` and the training, alignment, checkpoint, evaluation, and experiment modules imported by the notebook. If source is attached without Git metadata, `MILESTONE_2_4_SOURCE_COMMIT.txt` must contain this exact SHA. The notebook's source-tree digest reads only files resolved under the selected `REPO_ROOT`; inputs that resolve outside that checkout are rejected. It does not read sibling local worktrees. The corrective notebook revision can therefore use this already merged source commit without depending on the corrective PR's future commit.
