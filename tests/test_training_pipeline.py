@@ -359,6 +359,15 @@ def test_canonical_batch_provenance_survives_worker_style_serialization():
     assert torch.isfinite(output.logits).all()
 
 
+def test_malformed_serialized_batch_is_rejected_during_revalidation():
+    batch = collate_alignment_results([align_text("good movie", local_fast_tokenizer())])
+    offsets = batch.unit_offsets[0]
+    malformed = replace(batch, unit_offsets=(offsets[:3] + ((4, 10),) + offsets[4:],))
+
+    with pytest.raises(ValueError, match="do not form an ordered exact partition"):
+        pickle.loads(pickle.dumps(malformed))
+
+
 def test_validation_metrics_match_hand_computed_confusion_and_positive_scores():
     class FixedLogitModel(nn.Module):
         def forward(self, input_ids, attention_mask):

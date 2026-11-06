@@ -46,7 +46,11 @@ def test_masked_pooling_is_invariant_to_extra_right_padding():
     short = encoder(ids_short, lengths)
     long = encoder(ids_long, lengths)
 
-    torch.testing.assert_close(short, long, rtol=0, atol=0)
+    # Different padded tensor widths may trigger different floating-point
+    # convolution accumulation paths. The valid windows are still identically
+    # masked; this tight tolerance allows only backend rounding (CI observed
+    # maximum absolute error: 2.98e-8). Empty-span outputs remain exact zero.
+    torch.testing.assert_close(short, long, rtol=1e-6, atol=5e-8)
 
 
 def test_empty_spans_are_exact_zero_despite_convolution_and_projection_biases():

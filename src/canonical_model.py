@@ -9,7 +9,7 @@ are not aliases for this byte-based architecture.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor, nn
@@ -27,6 +27,8 @@ UNIT_PADDING = 0
 UNIT_TOKEN = 1
 UNIT_GAP = 2
 UNIT_SPECIAL = 3
+
+
 _COLLATOR_PROVENANCE = object()
 
 
@@ -47,19 +49,178 @@ class AlignedModelBatch:
     attention_mask: Tensor
     source_texts: tuple[str, ...]
     unit_offsets: tuple[tuple[tuple[int, int], ...], ...]
-    _alignment_provenance: object | None = field(default=None, repr=False, compare=False)
+    _alignment_provenance: object | None = field(default=None, init=False, repr=False, compare=False)
+
+    def __reduce__(self):
+        """Serialize tensor data through a validating reconstruction path.
+
+        Pickle does not carry a caller-provided provenance marker. The restore
+        helper rechecks ordered source coverage and byte ownership before it
+        grants the private in-process marker.
+        """
+        return (
+            _restore_aligned_model_batch,
+            (
+                self.input_ids,
+                self.byte_input_ids,
+                self.byte_lengths,
+                self.byte_attention_mask,
+                self.unit_type_ids,
+                self.attention_mask,
+                self.source_texts,
+                self.unit_offsets,
+            ),
+        )
 
     def to(self, device: torch.device | str) -> AlignedModelBatch:
         """Return a copy with every tensor moved to ``device``."""
-        return replace(
-            self,
-            input_ids=self.input_ids.to(device),
-            byte_input_ids=self.byte_input_ids.to(device),
-            byte_lengths=self.byte_lengths.to(device),
-            byte_attention_mask=self.byte_attention_mask.to(device),
-            unit_type_ids=self.unit_type_ids.to(device),
-            attention_mask=self.attention_mask.to(device),
+        return _restore_aligned_model_batch(
+            self.input_ids.to(device),
+            self.byte_input_ids.to(device),
+            self.byte_lengths.to(device),
+            self.byte_attention_mask.to(device),
+            self.unit_type_ids.to(device),
+            self.attention_mask.to(device),
+            self.source_texts,
+            self.unit_offsets,
         )
+
+
+def _restore_aligned_model_batch(
+    input_ids: Tensor,
+    byte_input_ids: Tensor,
+    byte_lengths: Tensor,
+    byte_attention_mask: Tensor,
+    unit_type_ids: Tensor,
+    attention_mask: Tensor,
+    source_texts: tuple[str, ...],
+    unit_offsets: tuple[tuple[tuple[int, int], ...], ...],
+) -> AlignedModelBatch:
+    """Revalidate serialized batch ownership before restoring provenance."""
+    if not isinstance(input_ids, Tensor) or input_ids.ndim != 2:
+        raise ValueError("serialized aligned batch input_ids must have shape [batch, units].")
+    batch_size, unit_count = input_ids.shape
+    if not isinstance(byte_input_ids, Tensor) or byte_input_ids.ndim != 3 or byte_input_ids.shape[-1] == 0:
+        raise ValueError("serialized aligned batch byte_input_ids must have shape [batch, units, bytes].")
+    expected_shapes = (
+        (byte_lengths, (batch_size, unit_count), "byte_lengths"),
+        (unit_type_ids, (batch_size, unit_count), "unit_type_ids"),
+        (attention_mask, (batch_size, unit_count), "attention_mask"),
+    )
+    for value, expected, name in expected_shapes:
+        if not isinstance(value, Tensor) or tuple(value.shape) != expected:
+            raise ValueError(f"serialized aligned batch {name} has an invalid shape.")
+    if byte_input_ids.shape[:2] != (batch_size, unit_count):
+        raise ValueError("serialized aligned batch byte_input_ids has an invalid shape.")
+    if not isinstance(byte_attention_mask, Tensor) or byte_attention_mask.shape != byte_input_ids.shape:
+        raise ValueError("serialized aligned batch byte_attention_mask has an invalid shape.")
+    if batch_size == 0 or unit_count == 0 or len(source_texts) != batch_size or len(unit_offsets) != batch_size:
+        raise ValueError("serialized aligned batch metadata does not match its tensor dimensions.")
+    if any(not isinstance(text, str) for text in source_texts):
+        raise ValueError("serialized aligned batch source_texts must contain strings.")
+    if any(len(row) != unit_count for row in unit_offsets):
+        raise ValueError("serialized aligned batch offsets do not match its unit dimensions.")
+    tensors = (byte_input_ids, byte_lengths, byte_attention_mask, unit_type_ids, attention_mask)
+    if any(value.device != input_ids.device for value in tensors):
+        raise ValueError("serialized aligned batch tensors must share one device.")
+    integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    if any(value.dtype not in integer_dtypes for value in (input_ids, byte_input_ids, byte_lengths, unit_type_ids)):
+        raise ValueError("serialized aligned batch IDs, lengths, and types must be integer tensors.")
+    if attention_mask.dtype not in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+        raise ValueError("serialized aligned batch attention mask must be boolean or integer.")
+    if byte_attention_mask.dtype not in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+        raise ValueError("serialized aligned batch byte mask must be boolean or integer.")
+    if torch.any((attention_mask != 0) & (attention_mask != 1)):
+        raise ValueError("serialized aligned batch attention mask must contain only zero or one.")
+    if torch.any((unit_type_ids < UNIT_PADDING) | (unit_type_ids > UNIT_SPECIAL)):
+        raise ValueError("serialized aligned batch contains an unknown unit type.")
+    if torch.any(byte_lengths < 0) or torch.any(byte_lengths > byte_input_ids.shape[-1]):
+        raise ValueError("serialized aligned batch contains an invalid byte length.")
+    if torch.any((byte_attention_mask != 0) & (byte_attention_mask != 1)):
+        raise ValueError("serialized aligned batch byte mask must contain only zero or one.")
+
+    batch = AlignedModelBatch(
+        input_ids=input_ids,
+        byte_input_ids=byte_input_ids,
+        byte_lengths=byte_lengths,
+        byte_attention_mask=byte_attention_mask,
+        unit_type_ids=unit_type_ids,
+        attention_mask=attention_mask,
+        source_texts=source_texts,
+        unit_offsets=unit_offsets,
+    )
+    for row_index, (text, offsets) in enumerate(zip(source_texts, unit_offsets)):
+        cursor = 0
+        saw_padding = False
+        for unit_index, raw_pair in enumerate(offsets):
+            if not isinstance(raw_pair, (tuple, list)) or len(raw_pair) != 2:
+                raise ValueError("serialized aligned batch contains a malformed source offset.")
+            start, end = raw_pair
+            if any(isinstance(value, bool) or not isinstance(value, int) for value in (start, end)):
+                raise ValueError("serialized aligned batch offsets must be integer character ranges.")
+            unit_type = int(unit_type_ids[row_index, unit_index].item())
+            attended = bool(attention_mask[row_index, unit_index].item())
+            length = int(byte_lengths[row_index, unit_index].item())
+            if unit_type == UNIT_PADDING:
+                saw_padding = True
+                if (
+                    attended
+                    or (start, end) != (0, 0)
+                    or length != 0
+                    or torch.any(byte_input_ids[row_index, unit_index] != 0)
+                    or torch.any(byte_attention_mask[row_index, unit_index])
+                ):
+                    raise ValueError("serialized aligned padding must own no source or bytes.")
+                continue
+            if saw_padding:
+                raise ValueError("serialized aligned units cannot follow sequence padding.")
+            if not attended:
+                raise ValueError("serialized source and special units must be attended.")
+            if unit_type == UNIT_SPECIAL:
+                if (
+                    (start, end) != (0, 0)
+                    or length != 0
+                    or torch.any(byte_input_ids[row_index, unit_index] != 0)
+                    or torch.any(byte_attention_mask[row_index, unit_index])
+                ):
+                    raise ValueError("serialized structural special units cannot own source bytes.")
+                continue
+            if unit_type not in (UNIT_TOKEN, UNIT_GAP):
+                raise ValueError("serialized aligned batch contains an unknown unit type.")
+            if unit_type == UNIT_TOKEN and start == end == cursor and length == 0:
+                if torch.any(byte_input_ids[row_index, unit_index] != 0) or torch.any(
+                    byte_attention_mask[row_index, unit_index]
+                ):
+                    raise ValueError("serialized zero-length token units cannot carry bytes.")
+                continue
+            if start != cursor or end <= start or end > len(text):
+                raise ValueError("serialized source units do not form an ordered exact partition.")
+            if length <= 0 or length > byte_input_ids.shape[-1]:
+                raise ValueError("serialized source unit has an invalid byte length.")
+            ids = byte_input_ids[row_index, unit_index]
+            if (
+                torch.any(ids[:length] < 1)
+                or torch.any(ids[:length] > 256)
+                or torch.any(ids[length:] != 0)
+            ):
+                raise ValueError("serialized source unit has invalid byte IDs or padding.")
+            mask = byte_attention_mask[row_index, unit_index].bool()
+            expected_mask = torch.arange(ids.shape[0], device=ids.device) < length
+            if not torch.equal(mask, expected_mask):
+                raise ValueError("serialized source unit byte mask disagrees with its length.")
+            raw_bytes = bytes(int(value) - 1 for value in ids[:length].tolist())
+            try:
+                encoded_piece = text[start:end].encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise ValueError("serialized source text contains an unpaired surrogate.") from exc
+            if raw_bytes != encoded_piece:
+                raise ValueError("serialized byte span does not match its original source range.")
+            cursor = end
+        if cursor != len(text):
+            raise ValueError(f"serialized aligned row {row_index} does not cover its full source text.")
+
+    object.__setattr__(batch, "_alignment_provenance", _COLLATOR_PROVENANCE)
+    return batch
 
 
 @dataclass(frozen=True)
@@ -188,7 +349,7 @@ def collate_alignment_results(
         torch.arange(max_bytes).view(1, 1, max_bytes)
         < byte_lengths.unsqueeze(-1)
     )
-    return AlignedModelBatch(
+    batch = AlignedModelBatch(
         input_ids=token_ids,
         byte_input_ids=byte_ids,
         byte_lengths=byte_lengths,
@@ -197,8 +358,9 @@ def collate_alignment_results(
         attention_mask=torch.tensor(padded.attention_mask, dtype=torch.long),
         source_texts=tuple(result.text for result in alignments),
         unit_offsets=tuple(unit_offsets),
-        _alignment_provenance=_COLLATOR_PROVENANCE,
     )
+    object.__setattr__(batch, "_alignment_provenance", _COLLATOR_PROVENANCE)
+    return batch
 
 
 class CanonicalByteAwareDistilBert(nn.Module):
