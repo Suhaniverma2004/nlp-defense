@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import pytest
 import torch
 import torch.nn.functional as F
@@ -338,13 +336,35 @@ def test_forward_rejects_incompatible_or_non_batch_inputs():
         model(torch.ones((1, 2), dtype=torch.long))
 
     batch = collate_alignment_results([make_alignment("x", [(0, 1)])])
-    incompatible = replace(batch, attention_mask=torch.zeros_like(batch.attention_mask))
+    incompatible = batch.to(batch.input_ids.device)
+    incompatible.attention_mask.zero_()
     with pytest.raises(ValueError, match="attention_mask must be 1"):
         model(incompatible)
 
-    fabricated = replace(batch, _alignment_provenance=None)
+    fabricated = AlignedModelBatch(
+        input_ids=batch.input_ids,
+        byte_input_ids=batch.byte_input_ids,
+        byte_lengths=batch.byte_lengths,
+        byte_attention_mask=batch.byte_attention_mask,
+        unit_type_ids=batch.unit_type_ids,
+        attention_mask=batch.attention_mask,
+        source_texts=batch.source_texts,
+        unit_offsets=batch.unit_offsets,
+    )
     with pytest.raises(ValueError, match="must be produced by collate_alignment_results"):
         model(fabricated)
+    with pytest.raises(TypeError, match="_alignment_provenance"):
+        AlignedModelBatch(
+            input_ids=batch.input_ids,
+            byte_input_ids=batch.byte_input_ids,
+            byte_lengths=batch.byte_lengths,
+            byte_attention_mask=batch.byte_attention_mask,
+            unit_type_ids=batch.unit_type_ids,
+            attention_mask=batch.attention_mask,
+            source_texts=batch.source_texts,
+            unit_offsets=batch.unit_offsets,
+            _alignment_provenance=object(),
+        )
 
 
 def test_model_requires_explicitly_constructed_distilbert_backbone():
