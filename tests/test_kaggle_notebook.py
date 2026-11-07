@@ -367,3 +367,142 @@ def test_source_tree_digest_covers_checked_out_runtime_and_ignores_other_worktre
     assert digest(root) == before
     runtime.write_text("runtime = 2\n", encoding="utf-8")
     assert digest(root) != before
+
+
+PINNED_HF_REVISION = "12040accade4e8a0f71eabdb258fecc2e7e948be"
+
+
+def _fake_hf_snapshot(root: Path, *, repo_id: str = "distilbert-base-uncased", revision: str = PINNED_HF_REVISION, missing: str | None = None, include_weights: bool = True) -> Path:
+    cache_repo = "models--" + repo_id.replace("/", "--")
+    snapshot = root / cache_repo / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    assets = {
+        "config.json": b'{"model_type":"distilbert"}',
+        "tokenizer.json": b'{"version":"1.0"}',
+        "tokenizer_config.json": b'{"tokenizer_class":"DistilBertTokenizerFast"}',
+        "vocab.txt": b"[PAD]\n[UNK]\n",
+        "special_tokens_map.json": b'{"unk_token":"[UNK]"}',
+    }
+    if include_weights:
+        assets["model.safetensors"] = b"test-weights"
+    for name, content in assets.items():
+        if name != missing:
+            (snapshot / name).write_bytes(content)
+    return snapshot
+
+
+def _run_hf_asset_verifier(snapshot: Path, *, model_id: str = "distilbert-base-uncased", model_revision: str = PINNED_HF_REVISION, tokenizer_id: str = "distilbert-base-uncased", tokenizer_revision: str = PINNED_HF_REVISION, local_files_only: bool = True):
+    verifier = _notebook_function("verify_pinned_hf_assets", {"Path": Path})
+    calls = []
+    def snapshot_download_fn(**kwargs):
+        calls.append(kwargs)
+        return str(snapshot)
+    result = verifier(
+        model_id, model_revision, tokenizer_id, tokenizer_revision,
+        pinned_revision=PINNED_HF_REVISION,
+        local_files_only=local_files_only,
+        snapshot_download_fn=snapshot_download_fn,
+    )
+    return result, calls
+
+
+def test_pinned_hf_verifier_accepts_exact_repo_revision_and_records_required_asset_hashes(tmp_path: Path) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path)
+    result, calls = _run_hf_asset_verifier(snapshot)
+    assert len(calls) == 2
+    assert all(call["repo_id"] == "distilbert-base-uncased" for call in calls)
+    assert all(call["revision"] == PINNED_HF_REVISION for call in calls)
+    assert all(call["local_files_only"] is True for call in calls)
+    assert all({"config.json", "tokenizer.json", "tokenizer_config.json", "vocab.txt", "model.safetensors"} <= set(call["allow_patterns"]) for call in calls)
+    assert result["model_revision"] == result["tokenizer_revision"] == PINNED_HF_REVISION
+    assert result["model_snapshot_identity"] == result["tokenizer_snapshot_identity"]
+    assert result["required_assets"] == ["config.json", "tokenizer.json", "tokenizer_config.json", "vocab.txt"]
+    assert set(result["required_assets"]) <= set(result["asset_sha256"])
+    import hashlib
+    assert result["asset_sha256"]["config.json"] == hashlib.sha256((snapshot / "config.json").read_bytes()).hexdigest()
+    assert result["asset_sha256"]["tokenizer.json"] == hashlib.sha256((snapshot / "tokenizer.json").read_bytes()).hexdigest()
+    assert result["weight_assets"] == ["model.safetensors"]
+
+
+@pytest.mark.parametrize("missing", ["config.json", "tokenizer.json", "tokenizer_config.json", "vocab.txt"])
+def test_pinned_hf_verifier_rejects_missing_required_asset(tmp_path: Path, missing: str) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path, missing=missing)
+    with pytest.raises(RuntimeError, match="missing required assets"):
+        _run_hf_asset_verifier(snapshot)
+
+
+def test_pinned_hf_verifier_rejects_missing_model_weights(tmp_path: Path) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path, include_weights=False)
+    with pytest.raises(RuntimeError, match="no supported model weights"):
+        _run_hf_asset_verifier(snapshot)
+
+
+def test_pinned_hf_verifier_rejects_wrong_repo_snapshot_identity(tmp_path: Path) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path, repo_id="other-repository")
+    verifier = _notebook_function("verify_pinned_hf_assets", {"Path": Path})
+    with pytest.raises(RuntimeError, match="unexpected repository snapshot identity"):
+        verifier("distilbert-base-uncased", PINNED_HF_REVISION, "distilbert-base-uncased", PINNED_HF_REVISION, pinned_revision=PINNED_HF_REVISION, local_files_only=True, snapshot_download_fn=lambda **kwargs: str(snapshot))
+
+
+@pytest.mark.parametrize(
+    ("model_id", "model_revision", "tokenizer_id", "tokenizer_revision", "message"),
+    [
+        ("another/model", PINNED_HF_REVISION, "distilbert-base-uncased", PINNED_HF_REVISION, "repository IDs"),
+        ("distilbert-base-uncased", "0" * 40, "distilbert-base-uncased", "0" * 40, "pinned revision"),
+        ("distilbert-base-uncased", PINNED_HF_REVISION, "distilbert-base-uncased", "0" * 40, "must be identical"),
+        ("distilbert-base-uncased", "main", "distilbert-base-uncased", "main", "40-character commit SHA"),
+    ],
+)
+def test_pinned_hf_verifier_rejects_inconsistent_or_mutable_requests(tmp_path: Path, model_id: str, model_revision: str, tokenizer_id: str, tokenizer_revision: str, message: str) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path)
+    verifier = _notebook_function("verify_pinned_hf_assets", {"Path": Path})
+    with pytest.raises(RuntimeError, match=message):
+        verifier(model_id, model_revision, tokenizer_id, tokenizer_revision, pinned_revision=PINNED_HF_REVISION, local_files_only=True, snapshot_download_fn=lambda **kwargs: str(snapshot))
+
+
+def test_pinned_hf_verifier_rejects_snapshot_with_wrong_revision(tmp_path: Path) -> None:
+    snapshot = _fake_hf_snapshot(tmp_path, revision="0" * 40)
+    with pytest.raises(RuntimeError, match="unexpected repository snapshot identity"):
+        _run_hf_asset_verifier(snapshot)
+
+
+def test_notebook_records_verified_assets_and_avoids_private_commit_hash_fields() -> None:
+    _, _, code = _notebook()
+    assert "from huggingface_hub import snapshot_download" in code
+    assert "_commit_hash" not in code
+    assert "verified_hf_assets" in code
+    assert "asset_verification" in code
+    assert "fresh_asset_verification" in code
+    assert "local_files_only=not ALLOW_PINNED_ASSET_DOWNLOAD" in code
+    assert "runtime_report.update({'model_id':MODEL_ID,'model_revision':asset_verification['model_revision']" in code
+    assert "'verified_hf_assets':asset_verification" in code
+
+
+def test_training_pipeline_keeps_explicit_pinned_from_pretrained_calls() -> None:
+    root = NOTEBOOK.parents[1]
+    source = (root / "src" / "training.py").read_text(encoding="utf-8")
+    assert "PINNED_REPRODUCIBILITY_REVISION = \"12040accade4e8a0f71eabdb258fecc2e7e948be\"" in source
+    assert "config.tokenizer_id,\n            revision=config.tokenizer_revision" in source
+    assert "config.model_id,\n            revision=config.model_revision" in source
+
+
+def test_pinned_hf_verifier_fails_closed_when_snapshot_is_unavailable() -> None:
+    verifier = _notebook_function("verify_pinned_hf_assets", {"Path": Path})
+    def unavailable(**kwargs):
+        raise FileNotFoundError("pinned snapshot is not cached")
+    with pytest.raises(RuntimeError, match="Could not resolve model snapshot"):
+        verifier("distilbert-base-uncased", PINNED_HF_REVISION, "distilbert-base-uncased", PINNED_HF_REVISION, pinned_revision=PINNED_HF_REVISION, local_files_only=True, snapshot_download_fn=unavailable)
+
+
+def test_supported_huggingface_hub_snapshot_download_api_is_available() -> None:
+    import inspect
+    from huggingface_hub import snapshot_download
+    parameters = inspect.signature(snapshot_download).parameters
+    assert {"repo_id", "revision", "local_files_only", "allow_patterns"} <= set(parameters)
+
+
+def test_notebook_loaders_keep_explicit_pinned_revisions_and_cache_switch() -> None:
+    _, _, code = _notebook()
+    assert "AutoTokenizer.from_pretrained(TOKENIZER_ID,revision=TOKENIZER_REVISION,use_fast=True,local_files_only=local_only)" in code
+    assert "AutoConfig.from_pretrained(MODEL_ID,revision=MODEL_REVISION,local_files_only=local_only)" in code
+    assert "MODEL_REVISION==TOKENIZER_REVISION==PINNED_REPRODUCIBILITY_REVISION" in code
