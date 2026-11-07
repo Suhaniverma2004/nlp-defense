@@ -16,8 +16,9 @@ before training. A Kaggle source input without Git metadata must include
 `12040accade4e8a0f71eabdb258fecc2e7e948be` for both
 `distilbert-base-uncased` assets. This is the revision characterized and tested
 locally in this repository. It is not an independently approved production
-revision. The notebook verifies the resolved commit metadata and packages the
-tokenizer into each checkpoint using the existing checkpoint API.
+revision. The notebook verifies the resolved Hugging Face snapshot identity and required
+asset hashes without relying on Transformers private commit-hash fields. It
+packages the tokenizer into each checkpoint using the existing checkpoint API.
 
 The requested Kaggle accelerator is NVIDIA T4 x2. The notebook enumerates each
 visible CUDA device and records its name, memory capacity, compute capability,
@@ -248,3 +249,9 @@ This deterministic fingerprint establishes equality of the recorded inputs; it d
 ## Immutable source pairing
 
 The notebook checks out repository source commit `65391a2b0a715bdb67156df4aa1d5725c1edbc76`. This commit contains `src/kaggle_runtime.py` and the training, alignment, checkpoint, evaluation, and experiment modules imported by the notebook. If source is attached without Git metadata, `MILESTONE_2_4_SOURCE_COMMIT.txt` must contain this exact SHA. The notebook's source-tree digest reads only files resolved under the selected `REPO_ROOT`; inputs that resolve outside that checkout are rejected. It does not read sibling local worktrees. The corrective notebook revision can therefore use this already merged source commit without depending on the corrective PR's future commit.
+
+## Immutable Hugging Face asset verification
+
+Notebook preflight uses the supported `huggingface_hub.snapshot_download` API with both repository IDs and revisions supplied explicitly. It verifies that the returned cache path identifies `models--distilbert-base-uncased/snapshots/12040accade4e8a0f71eabdb258fecc2e7e948be`, that model and tokenizer resolve to the same snapshot, and that `config.json`, `tokenizer.json`, `tokenizer_config.json`, `vocab.txt`, and model weights are present and hashable. Optional tokenizer metadata files are included in the verified asset hashes when present. The existing `AutoTokenizer.from_pretrained` and `AutoConfig.from_pretrained` calls remain pinned to the same IDs/revision and honor the same explicit local-cache/download switch.
+
+The resolved repository identity, revision, and required asset hashes are included in the validation fingerprint and exported `runtime_report.json`/`workflow_config.json`. Training continues to pass the pinned revisions to `DistilBertModel.from_pretrained` and `AutoTokenizer.from_pretrained`; checkpoint metadata continues recording those revisions. Notebook verification does not rely on Transformers private `_commit_hash` fields. Runtime compatibility and the cache layout still require confirmation in the actual Kaggle image; local tests use synthetic cache snapshots and do not download model assets.
